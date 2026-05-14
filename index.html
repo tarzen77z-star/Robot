@@ -292,7 +292,14 @@ async function load(){
     if(bj.code||bj.message?.toLowerCase().includes("unauthorized")){alert("API keys rejected. Check your Alpaca paper trading Key ID and Secret Key.");btn.disabled=false;btn.textContent="LOAD";return;}
     if(!bj.bars?.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
     // Enrich ALL bars (including pre-market) so MAs are warmed up
-    const allBars=enrich(bj.bars.map(b=>({time:b.t.slice(11,16),open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v})));
+    const allBars=enrich(bj.bars.map(b=>{
+      // Convert UTC timestamp to ET (Eastern Time)
+      const utc=new Date(b.t);
+      const et=new Date(utc.toLocaleString("en-US",{timeZone:"America/New_York"}));
+      const hh=et.getHours().toString().padStart(2,"0");
+      const mm=et.getMinutes().toString().padStart(2,"0");
+      return{time:`${hh}:${mm}`,open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v};
+    }));
     // Display only market hours 9:30am-4:00pm — MAs already calculated
     BARS=allBars.filter(b=>{
       const [hh,mm]=b.time.split(":").map(Number);
