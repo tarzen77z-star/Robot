@@ -62,7 +62,7 @@ td{padding:6px 10px}
 </div>
 <div class="panel"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
 <div class="panel"><div class="plabel">RSI (14)</div><canvas id="rsiCv" height="100" style="width:100%"></canvas></div>
-<div class="panel" style="margin-bottom:14px"><div class="plabel">MACD (12, 26, 9)</div><canvas id="macdCv" height="120" style="width:100%"></canvas></div>
+<div class="panel" style="margin-bottom:14px"><div class="plabel">MACD (12, 26, 9)</div><canvas id="macdCv" height="180" style="width:100%"></canvas></div>
 <div id="tbl"></div>
 <div id="msg" style="text-align:center;padding:60px 20px;color:#3d5470;font-size:13px">
   Enter your Alpaca paper trading keys, pick a date and click LOAD
@@ -198,7 +198,7 @@ function renderAll(){
   drawCandles();
   drawSub("volCv",55,volFn);
   drawSub("rsiCv",100,rsiFn);
-  drawSub("macdCv",120,macdFn);
+  drawSub("macdCv",180,macdFn);
 }
 
 function buildTable(){
