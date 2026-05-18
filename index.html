@@ -355,8 +355,13 @@ function applyFilter() {
 }
 
 async function load(){
-  const ak=document.getElementById("ak").value.trim();
-  const sk=document.getElementById("sk").value.trim();
+  // Get keys — use saved ones if fields are empty (happens on ticker switch)
+  const akField=document.getElementById("ak").value.trim();
+  const skField=document.getElementById("sk").value.trim();
+  if(akField) sessionStorage.setItem("ak",akField);
+  if(skField) sessionStorage.setItem("sk",skField);
+  const ak=akField||sessionStorage.getItem("ak")||"";
+  const sk=skField||sessionStorage.getItem("sk")||"";
   const sym=document.getElementById("sym").value.trim()||"MSTR";
   const dt=document.getElementById("dt").value;
   if(!ak||!sk){alert("Please enter your Alpaca paper trading API Key ID and Secret Key.");return;}
@@ -365,12 +370,6 @@ async function load(){
   document.getElementById("msg").style.display="none";
   try{
     const h={"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
-    const s=encodeURIComponent(dt+"T06:00:00-04:00"),e=encodeURIComponent(dt+"T16:00:00-04:00");
-    const [bR,aR,oR]=await Promise.all([
-      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=800`,{headers:h}),
-      fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
-      fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=200`,{headers:h})
-    ]);
     const bj=await bR.json(),aj=await aR.json(),oj=await oR.json();
     if(bj.code||bj.message?.toLowerCase().includes("unauthorized")){alert("API keys rejected. Check your Alpaca paper trading Key ID and Secret Key.");btn.disabled=false;btn.textContent="LOAD";return;}
     if(!bj.bars?.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
@@ -420,6 +419,11 @@ async function load(){
 }
 
 document.getElementById("dt").value=new Date().toISOString().split("T")[0];
+// Restore saved keys from sessionStorage
+const savedAk=sessionStorage.getItem("alpaca_ak");
+const savedSk=sessionStorage.getItem("alpaca_sk");
+if(savedAk) document.getElementById("ak").value=savedAk;
+if(savedSk) document.getElementById("sk").value=savedSk;
 </script>
 </body>
 </html>
