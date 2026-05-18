@@ -42,6 +42,16 @@ td{padding:6px 10px}
 
 <div id="statsRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
 
+<div id="filterRow" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+  <span style="font-size:10px;color:#3d5470;margin-right:4px">FILTER:</span>
+  <button onclick="toggleFilter('ALL')" id="f-ALL" style="background:#2563eb;color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer;font-weight:700">ALL</button>
+  <button onclick="toggleFilter('MSTR')" id="f-MSTR" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">MSTR</button>
+  <button onclick="toggleFilter('TSLA')" id="f-TSLA" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">TSLA</button>
+  <button onclick="toggleFilter('NFLX')" id="f-NFLX" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">NFLX</button>
+  <button onclick="toggleFilter('META')" id="f-META" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">META</button>
+  <span style="font-size:10px;color:#3d5470;margin-left:8px" id="filterCount"></span>
+</div>
+
 <div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;align-items:center;padding:8px 12px;background:#0e1420;border-radius:8px;border:1px solid #1a2540;font-size:11px">
   <span style="color:#22d3ee;font-size:16px;font-weight:900">─</span><span style="color:#22d3ee;font-weight:700">MA20</span>
   <span style="color:#fbbf24;font-size:16px;font-weight:900">─</span><span style="color:#fbbf24;font-weight:700">MA50</span>
@@ -290,6 +300,53 @@ document.getElementById("cv").addEventListener("mousemove",e=>{
 document.getElementById("cv").addEventListener("mouseleave",()=>document.getElementById("tip").style.display="none");
 window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
 
+let ACTIVE_FILTER = 'ALL';
+let ALL_TRADES = [];
+let ALL_BETTER = [];
+
+function toggleFilter(ticker) {
+  ACTIVE_FILTER = ticker;
+  // Update button styles
+  ['ALL','MSTR','TSLA','NFLX','META'].forEach(t => {
+    const btn = document.getElementById('f-'+t);
+    if (!btn) return;
+    if (t === ticker) {
+      btn.style.background = '#2563eb';
+      btn.style.color = '#fff';
+      btn.style.border = '1px solid #2563eb';
+      btn.style.fontWeight = '700';
+    } else {
+      btn.style.background = '#1a2540';
+      btn.style.color = '#6b90b0';
+      btn.style.border = '1px solid #1a2540';
+      btn.style.fontWeight = 'normal';
+    }
+  });
+  applyFilter();
+}
+
+function applyFilter() {
+  if (ACTIVE_FILTER === 'ALL') {
+    TRADES = ALL_TRADES;
+    BETTER = ALL_BETTER;
+  } else {
+    // Filter by symbol — note field matches the order symbol
+    TRADES = ALL_TRADES.filter(t => {
+      const sym = (t.note || t.symbol || '').toUpperCase();
+      return sym.startsWith(ACTIVE_FILTER);
+    });
+    BETTER = ALL_BETTER.filter(t => {
+      const sym = (t.note || t.symbol || '').toUpperCase();
+      return sym.startsWith(ACTIVE_FILTER);
+    });
+  }
+  const cnt = TRADES.length;
+  const el = document.getElementById('filterCount');
+  if (el) el.textContent = ACTIVE_FILTER === 'ALL' ? '' : `${cnt} trades`;
+  renderAll();
+  buildTable();
+}
+
 async function load(){
   const ak=document.getElementById("ak").value.trim();
   const sk=document.getElementById("sk").value.trim();
@@ -338,9 +395,17 @@ async function load(){
       return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
     });
     BETTER=betterEntries(BARS,TRADES);
+    ALL_TRADES=[...TRADES];
+    ALL_BETTER=[...BETTER];
+    // Auto-detect tickers and show relevant filter buttons
+    const tickers = new Set(ALL_TRADES.map(t=>(t.note||'').split(/[0-9]/)[0].toUpperCase()).filter(t=>t.length>=2&&t.length<=5));
+    ['MSTR','TSLA','NFLX','META'].forEach(t=>{
+      const btn=document.getElementById('f-'+t);
+      if(btn) btn.style.display = tickers.has(t) ? 'block' : 'none';
+    });
+    ACTIVE_FILTER='ALL';
+    toggleFilter('ALL');
     buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},{pnl,buys,sells,count:TRADES.length},dt);
-    buildTable();
-    renderAll();
   }catch(err){
     alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
   }
