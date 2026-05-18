@@ -25,7 +25,10 @@ td{padding:6px 10px}
 
 <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
   <div>
+    <div style="display:flex;align-items:baseline;gap:12px">
     <div style="font-size:22px;font-weight:900;letter-spacing:3px;color:#fff">POST-MORTEM ANALYSIS</div>
+    <div id="activeTicker" style="font-size:18px;font-weight:900;letter-spacing:2px;color:#fbbf24;background:#fbbf2415;padding:2px 12px;border-radius:6px;border:1px solid #fbbf2433;display:none"></div>
+  </div>
     <div style="font-size:10px;color:#7ca0c0;margin-top:4px;letter-spacing:2px">1-MIN CANDLESTICK · MA20 / MA50 / MA200 · RSI · MACD</div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -43,7 +46,7 @@ td{padding:6px 10px}
 <div id="statsRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
 
 <div id="filterRow" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
-  <span style="font-size:10px;color:#3d5470;margin-right:4px">TICKER:</span>
+  <span style="font-size:10px;color:#3d5470;margin-right:4px;letter-spacing:1px">CHART:</span>
   <button onclick="toggleFilter('ALL')" id="f-ALL" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">↺</button>
   <button onclick="toggleFilter('MSTR')" id="f-MSTR" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">MSTR</button>
   <button onclick="toggleFilter('TSLA')" id="f-TSLA" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">TSLA</button>
@@ -312,15 +315,17 @@ function toggleFilter(ticker) {
     const btn = document.getElementById('f-'+t);
     if (!btn) return;
     if (t === ticker) {
-      btn.style.background = '#2563eb';
-      btn.style.color = '#fff';
-      btn.style.border = '1px solid #2563eb';
-      btn.style.fontWeight = '700';
+      btn.style.background = '#fbbf24';
+      btn.style.color = '#080c14';
+      btn.style.border = '1px solid #fbbf24';
+      btn.style.fontWeight = '900';
+      btn.style.transform = 'scale(1.05)';
     } else {
       btn.style.background = '#1a2540';
       btn.style.color = '#6b90b0';
       btn.style.border = '1px solid #1a2540';
       btn.style.fontWeight = 'normal';
+      btn.style.transform = 'scale(1)';
     }
   });
 
@@ -400,10 +405,18 @@ async function load(){
     const lastEq = parseFloat(aj.last_equity || equity);
     const pnl    = equity - lastEq;
     let buys=0,sells=0;
-    TRADES=(Array.isArray(oj)?oj:[]).map(o=>{
+    // Filter orders to only the loaded symbol (orders API returns ALL tickers)
+    const filteredOrders=(Array.isArray(oj)?oj:[]).filter(o=>{
+      const orderSym=(o.symbol||"").toUpperCase();
+      // Match exact symbol OR option contracts (e.g. TSLA260529C...)
+      return orderSym===sym.toUpperCase() || orderSym.startsWith(sym.toUpperCase());
+    });
+    TRADES=filteredOrders.map(o=>{
       const t=new Date(o.filled_at||o.submitted_at);
       const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
-      const type=o.side==="buy"?"BUY":"SELL";
+      const isOption=o.symbol.length>5;
+      let type=o.side==="buy"?"BUY":"SELL";
+      if(isOption) type=o.side==="buy"?"BUY":"SELL";
       if(o.side==="buy"){buys++;}else{sells++;}
       return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
     });
@@ -418,6 +431,9 @@ async function load(){
     });
     ACTIVE_FILTER='ALL';
     toggleFilter('ALL');
+    // Show active ticker badge
+    const badge=document.getElementById('activeTicker');
+    if(badge){badge.textContent=sym;badge.style.display='block';}
     buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},{pnl,buys,sells,count:TRADES.length},dt);
   }catch(err){
     alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
