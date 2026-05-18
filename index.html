@@ -43,8 +43,8 @@ td{padding:6px 10px}
 <div id="statsRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
 
 <div id="filterRow" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
-  <span style="font-size:10px;color:#3d5470;margin-right:4px">FILTER:</span>
-  <button onclick="toggleFilter('ALL')" id="f-ALL" style="background:#2563eb;color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer;font-weight:700">ALL</button>
+  <span style="font-size:10px;color:#3d5470;margin-right:4px">TICKER:</span>
+  <button onclick="toggleFilter('ALL')" id="f-ALL" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">↺</button>
   <button onclick="toggleFilter('MSTR')" id="f-MSTR" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">MSTR</button>
   <button onclick="toggleFilter('TSLA')" id="f-TSLA" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">TSLA</button>
   <button onclick="toggleFilter('NFLX')" id="f-NFLX" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">NFLX</button>
@@ -306,6 +306,7 @@ let ALL_BETTER = [];
 
 function toggleFilter(ticker) {
   ACTIVE_FILTER = ticker;
+
   // Update button styles
   ['ALL','MSTR','TSLA','NFLX','META'].forEach(t => {
     const btn = document.getElementById('f-'+t);
@@ -322,7 +323,13 @@ function toggleFilter(ticker) {
       btn.style.fontWeight = 'normal';
     }
   });
-  applyFilter();
+
+  // Change symbol and reload for the selected ticker
+  if (ticker !== 'ALL') {
+    document.getElementById('sym').value = ticker;
+  }
+  // Always reload — fetches fresh bars + trades for selected symbol
+  load();
 }
 
 function applyFilter() {
