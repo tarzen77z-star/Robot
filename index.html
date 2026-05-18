@@ -185,13 +185,21 @@ function rsiFn(ctx,cw,h){
 }
 
 function macdFn(ctx,cw,h){
-  const PL=54,W=cw-PL-14,H=h-20,vals=BARS.map(b=>b.hist).filter(v=>v!=null),mx=Math.max(...vals.map(Math.abs))||1;
-  const gx=i=>PL+(i/(BARS.length-1))*W,gy=v=>4+H/2-(v/mx)*(H/2),bw=Math.max(1,Math.floor(W/BARS.length)-1);
-  ctx.clearRect(0,0,cw,h);ctx.strokeStyle="#3d5470";ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(PL,4+H/2);ctx.lineTo(PL+W,4+H/2);ctx.stroke();
-  BARS.forEach((b,i)=>{if(b.hist==null)return;const x=gx(i),z=4+H/2,bh=Math.abs((b.hist/mx)*(H/2));ctx.fillStyle=b.hist>=0?"#22c55ecc":"#ef4444cc";b.hist>=0?ctx.fillRect(x-bw/2,z-bh,bw,bh):ctx.fillRect(x-bw/2,z,bw,bh);});
+  const PL=54,W=cw-PL-14,H=h-24;
+  // Scale to max of histogram + MACD line + signal line so nothing clips
+  const allVals=[
+    ...BARS.map(b=>b.hist).filter(v=>v!=null),
+    ...BARS.map(b=>b.macd).filter(v=>v!=null),
+    ...BARS.map(b=>b.signal).filter(v=>v!=null)
+  ];
+  const mx=Math.max(...allVals.map(Math.abs),0.01);
+  const gx=i=>PL+(i/(BARS.length-1))*W,gy=v=>mid-(v/mx)*(H/2),bw=Math.max(1,Math.floor(W/BARS.length)-1);
+  const mid=H/2+8;  // center line with padding
+  ctx.clearRect(0,0,cw,h);ctx.strokeStyle="#3d5470";ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(PL,mid);ctx.lineTo(PL+W,mid);ctx.stroke();
+  BARS.forEach((b,i)=>{if(b.hist==null)return;const x=gx(i),z=mid,bh=Math.abs((b.hist/mx)*(H/2));ctx.fillStyle=b.hist>=0?"#22c55ecc":"#ef4444cc";b.hist>=0?ctx.fillRect(x-bw/2,z-bh,bw,bh):ctx.fillRect(x-bw/2,z,bw,bh);});
   [["macd","#2563eb"],["signal","#d97706"]].forEach(([k,col])=>{ctx.strokeStyle=col;ctx.lineWidth=1.4;ctx.beginPath();let f=true;BARS.forEach((b,i)=>{if(b[k]==null)return;f?(ctx.moveTo(gx(i),gy(b[k])),f=false):ctx.lineTo(gx(i),gy(b[k]));});ctx.stroke();});
   BARS.forEach((b,i)=>{if(i%30!==0)return;ctx.fillStyle="#6b90b0";ctx.font="9px monospace";ctx.textAlign="center";ctx.fillText(b.time,gx(i),h-3);});
-  ctx.fillStyle="#6b90b0";ctx.font="9px monospace";ctx.textAlign="right";ctx.fillText(mx.toFixed(1),PL-4,14);ctx.fillText("0",PL-4,4+H/2+4);ctx.fillText("-"+mx.toFixed(1),PL-4,4+H-4);
+  ctx.fillStyle="#6b90b0";ctx.font="9px monospace";ctx.textAlign="right";ctx.fillText("+"+mx.toFixed(2),PL-4,mid-H/2+10);ctx.fillText("0",PL-4,mid+4);ctx.fillText("-"+mx.toFixed(2),PL-4,mid+H/2-4);
 }
 
 function renderAll(){
@@ -202,7 +210,18 @@ function renderAll(){
 }
 
 function buildTable(){
-  let pnl=0;TRADES.forEach(t=>{pnl+=["SELL","SHORT"].includes(t.type)?t.price*t.qty:-t.price*t.qty;});
+  // Realized P&L only — match sells against buys, ignore open positions
+  let pnl=0;
+  const buys_q=[...TRADES.filter(t=>t.type==="BUY")];
+  TRADES.filter(t=>["SELL","COVER"].includes(t.type)).forEach(sell=>{
+    const buy=buys_q.shift();
+    if(buy) pnl+=(sell.price-buy.price)*Math.min(sell.qty,buy.qty);
+    else pnl+=sell.price*sell.qty; // sell without matching buy
+  });
+  TRADES.filter(t=>t.type==="SHORT").forEach(short=>{
+    const cover=TRADES.find(t=>t.type==="COVER");
+    if(cover) pnl+=(short.price-cover.price)*short.qty;
+  });
   const rows=TRADES.map(t=>{
     const b=BETTER.find(x=>x.layer===t.layer&&x.type===t.type);
     const diff=b?Math.abs(t.price-b.price):null;
@@ -235,7 +254,7 @@ function buildStats(acct,stats,dt){
   document.getElementById("statsRow").innerHTML=[
     {l:"PORTFOLIO",v:"$"+acct.portfolio.toLocaleString("en-US",{minimumFractionDigits:2}),s:"current balance",live:true,c:"#dce8f5"},
     {l:"CASH",v:"$"+acct.cash.toLocaleString("en-US",{minimumFractionDigits:2}),s:"available",live:true,c:"#dce8f5"},
-    {l:"DAY P&L",v:(pnl>=0?"+":"")+"$"+Math.abs(pnl).toLocaleString("en-US",{minimumFractionDigits:2}),s:dt,live:false,c:pnl>=0?"#22c55e":"#ef4444"},
+    {l:"DAY P&L",v:(pnl>=0?"+":"")+"$"+Math.abs(pnl).toLocaleString("en-US",{minimumFractionDigits:2}),s:"vs yesterday close",live:false,c:pnl>=0?"#22c55e":"#ef4444"},
     {l:"TRADES",v:String(stats.count),s:`${stats.buys}B / ${stats.sells}S`,live:false,c:"#dce8f5"}
   ].map(({l,v,s,live,c})=>`
     <div style="background:#0e1420;border:1px solid #1a2540;border-radius:8px;padding:10px 14px">
@@ -306,12 +325,16 @@ async function load(){
       const mins=hh*60+mm;
       return mins>=570&&mins<=960; // 9:30am to 4:00pm
     });
-    let pnl=0,buys=0,sells=0;
+    // True day P&L = portfolio value change since yesterday close
+    const equity = parseFloat(aj.equity || aj.portfolio_value || 0);
+    const lastEq = parseFloat(aj.last_equity || equity);
+    const pnl    = equity - lastEq;
+    let buys=0,sells=0;
     TRADES=(Array.isArray(oj)?oj:[]).map(o=>{
       const t=new Date(o.filled_at||o.submitted_at);
       const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
-      const type=o.side==="buy"?"BUY":"SELL",val=parseFloat(o.filled_qty)*parseFloat(o.filled_avg_price||0);
-      if(o.side==="buy"){pnl-=val;buys++;}else{pnl+=val;sells++;}
+      const type=o.side==="buy"?"BUY":"SELL";
+      if(o.side==="buy"){buys++;}else{sells++;}
       return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
     });
     BETTER=betterEntries(BARS,TRADES);
