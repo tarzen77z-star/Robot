@@ -324,12 +324,13 @@ function toggleFilter(ticker) {
     }
   });
 
-  // Change symbol and reload for the selected ticker
+  // Change symbol input for the selected ticker
   if (ticker !== 'ALL') {
     document.getElementById('sym').value = ticker;
+    load();  // reload chart for this ticker
+  } else {
+    applyFilter();
   }
-  // Always reload — fetches fresh bars + trades for selected symbol
-  load();
 }
 
 function applyFilter() {
@@ -370,6 +371,12 @@ async function load(){
   document.getElementById("msg").style.display="none";
   try{
     const h={"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
+    const s=encodeURIComponent(dt+"T06:00:00-04:00"),e=encodeURIComponent(dt+"T16:00:00-04:00");
+    const [bR,aR,oR]=await Promise.all([
+      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=800`,{headers:h}),
+      fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
+      fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=200`,{headers:h})
+    ]);
     const bj=await bR.json(),aj=await aR.json(),oj=await oR.json();
     if(bj.code||bj.message?.toLowerCase().includes("unauthorized")){alert("API keys rejected. Check your Alpaca paper trading Key ID and Secret Key.");btn.disabled=false;btn.textContent="LOAD";return;}
     if(!bj.bars?.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
@@ -420,8 +427,8 @@ async function load(){
 
 document.getElementById("dt").value=new Date().toISOString().split("T")[0];
 // Restore saved keys from sessionStorage
-const savedAk=sessionStorage.getItem("alpaca_ak");
-const savedSk=sessionStorage.getItem("alpaca_sk");
+const savedAk=sessionStorage.getItem("ak");
+const savedSk=sessionStorage.getItem("sk");
 if(savedAk) document.getElementById("ak").value=savedAk;
 if(savedSk) document.getElementById("sk").value=savedSk;
 </script>
