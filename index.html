@@ -59,10 +59,10 @@ td{padding:6px 10px}
   <span style="color:#22d3ee;font-size:16px;font-weight:900">─</span><span style="color:#22d3ee;font-weight:700">MA20</span>
   <span style="color:#fbbf24;font-size:16px;font-weight:900">─</span><span style="color:#fbbf24;font-weight:700">MA50</span>
   <span style="color:#c084fc;font-size:16px;font-weight:900">─</span><span style="color:#c084fc;font-weight:700">MA200</span>
-  <span style="color:#22c55e;font-size:14px">▲</span><span style="color:#22c55e;font-weight:700">Buy</span>
-  <span style="color:#f87171;font-size:14px">▼</span><span style="color:#f87171;font-weight:700">Sell</span>
-  <span style="color:#f97316;font-size:14px">▽</span><span style="color:#f97316;font-weight:700">Short</span>
-  <span style="color:#38bdf8;font-size:14px">△</span><span style="color:#38bdf8;font-weight:700">Cover</span>
+  <span style="color:#22c55e;font-size:14px">▲</span><span style="color:#22c55e;font-weight:700">Buy (LONG)</span>
+  <span style="color:#f87171;font-size:14px">▼</span><span style="color:#f87171;font-weight:700">Sell (EXIT)</span>
+  <span style="color:#f97316;font-size:14px">▽</span><span style="color:#f97316;font-weight:700">Short (SHORT)</span>
+  <span style="color:#38bdf8;font-size:14px">△</span><span style="color:#38bdf8;font-weight:700">Cover (COVER)</span>
   <span style="color:#fde68a;font-size:14px">★</span><span style="color:#fde68a;font-weight:700">Better entry</span>
   <span style="color:#3d5470;font-size:10px">— hover markers for details</span>
 </div>
@@ -147,16 +147,26 @@ function drawCandles(){
   const gs=(x,y0,up)=>{const bk=Math.round(x/8);if(!slots[bk])slots[bk]=[];let y=y0,a=0;while(a<10){if(!slots[bk].some(u=>Math.abs(u-y)<SL))break;y+=up?-SL:SL;a++;}slots[bk].push(y);return y;};
   cv._mk=[];
 
+  const TYPE_LBL={BUY:"LONG",SELL:"EXIT",SHORT:"SHORT",COVER:"COVER"};
+
   TRADES.forEach(t=>{
     const idx=BARS.findIndex(b=>b.time===t.time);if(idx<0)return;
     const bar=BARS[idx],col=MC[t.type]||"#888",sym=MS[t.type]||"•",up=MU[t.type]!==undefined?MU[t.type]:true;
     const x=gx(idx),yP=up?gy(bar.low):gy(bar.high),yM=gs(x,up?yP-22:yP+22,up);
+    const lbl=TYPE_LBL[t.type]||t.type;
+    // Connector line
     ctx.strokeStyle=col;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.beginPath();ctx.moveTo(x,yP);ctx.lineTo(x,up?yM+13:yM-13);ctx.stroke();ctx.setLineDash([]);
+    // Circle fill + border
     ctx.fillStyle=col+"25";ctx.beginPath();ctx.arc(x,yM,12,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle=col+"cc";ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(x,yM,12,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle=col;ctx.font="bold 12px monospace";ctx.textAlign="center";ctx.fillText(sym,x,yM+4);
-    ctx.font="bold 9px monospace";ctx.fillText(t.layer||"",x,up?yM-17:yM+26);
-    ctx.font="9px monospace";ctx.fillStyle=col+"bb";ctx.fillText("$"+t.price.toFixed(2),x,up?yM-28:yM+38);
+    ctx.strokeStyle=col+"cc";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,yM,12,0,Math.PI*2);ctx.stroke();
+    // Arrow symbol inside circle
+    ctx.fillStyle=col;ctx.font="bold 11px monospace";ctx.textAlign="center";ctx.fillText(sym,x,yM+4);
+    // Type label (LONG/EXIT/SHORT/COVER) — bold, clearly readable
+    ctx.font="bold 8px monospace";ctx.fillStyle="#fff";
+    ctx.fillText(lbl,x,up?yM-16:yM+25);
+    // Price
+    ctx.font="9px monospace";ctx.fillStyle=col+"cc";
+    ctx.fillText("$"+t.price.toFixed(2),x,up?yM-27:yM+37);
     cv._mk.push({x,y:yM,r:14,d:{...t,rsi:bar.rsi?.toFixed(0),ma20:bar.ma20?.toFixed(2)}});
   });
 
