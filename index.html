@@ -233,41 +233,126 @@ function renderAll(){
 }
 
 function buildTable(){
-  // Realized P&L only — match sells against buys, ignore open positions
-  let pnl=0;
-  const buys_q=[...TRADES.filter(t=>t.type==="BUY")];
-  TRADES.filter(t=>["SELL","COVER"].includes(t.type)).forEach(sell=>{
-    const buy=buys_q.shift();
-    if(buy) pnl+=(sell.price-buy.price)*Math.min(sell.qty,buy.qty);
-    else pnl+=sell.price*sell.qty; // sell without matching buy
+  // ── Pair buys → sells (FIFO) and shorts → covers ──────────────────────────
+  const sorted = [...TRADES].sort((a,b)=>a.time.localeCompare(b.time));
+  const buyQ   = sorted.filter(t=>t.type==="BUY");
+  const shortQ = sorted.filter(t=>t.type==="SHORT");
+  const pairs  = [];
+
+  // Long round-trips
+  sorted.filter(t=>["SELL","COVER"].includes(t.type)&&t.type==="SELL").forEach(sell=>{
+    const buy = buyQ.shift();
+    if(!buy) return;
+    const qty   = Math.min(sell.qty, buy.qty);
+    const gross = (sell.price - buy.price) * qty;
+    pairs.push({ kind:"LONG", buy, sell, qty, gross });
   });
-  TRADES.filter(t=>t.type==="SHORT").forEach(short=>{
-    const cover=TRADES.find(t=>t.type==="COVER");
-    if(cover) pnl+=(short.price-cover.price)*short.qty;
+
+  // Short round-trips
+  sorted.filter(t=>t.type==="COVER").forEach(cover=>{
+    const short = shortQ.shift();
+    if(!short) return;
+    const qty   = Math.min(cover.qty, short.qty);
+    const gross = (short.price - cover.price) * qty;
+    pairs.push({ kind:"SHORT", buy:short, sell:cover, qty, gross });
   });
-  const rows=TRADES.map(t=>{
-    const b=BETTER.find(x=>x.layer===t.layer&&x.type===t.type);
-    const diff=b?Math.abs(t.price-b.price):null;
-    const col=MC[t.type]||"#2563eb";
-    return`<tr style="border-bottom:1px solid #1a254022">
-      <td style="color:#3d5470;font-family:monospace">${t.time}</td>
-      <td><span class="pill" style="background:${col}22;color:${col}">${t.layer||"ORD"}</span></td>
-      <td style="color:${col};font-weight:700">${t.type}</td>
-      <td style="color:#dce8f5">${t.qty}${t.note?` <span style="color:#3d5470">(${t.note.slice(0,15)})</span>`:""}</td>
-      <td style="color:#dce8f5;font-family:monospace">$${t.price.toFixed(2)}</td>
-      <td style="color:#fde68a;font-family:monospace">${b?"$"+b.price.toFixed(2):"—"}</td>
-      <td style="color:${diff&&diff>.01?"#22c55e":"#3d5470"};font-weight:600">${diff&&diff>.01?"+$"+diff.toFixed(2):"—"}</td>
-    </tr>`;
+
+  // Open (unmatched) buys
+  buyQ.forEach(buy=>{
+    pairs.push({ kind:"LONG", buy, sell:null, qty:buy.qty, gross:null });
+  });
+
+  // Sort pairs by buy time
+  pairs.sort((a,b)=>a.buy.time.localeCompare(b.buy.time));
+
+  const totalPnl = pairs.reduce((s,p)=>s+(p.gross||0), 0);
+
+  // ── Reason heuristic ──────────────────────────────────────────────────────
+  function guessReason(trade){
+    const note = (trade.note||"").toUpperCase();
+    const layer = (trade.layer||"").toUpperCase();
+    if(layer.includes("L1")) return "L1 — pivot support buy";
+    if(layer.includes("L2")) return "L2 — $5 drop ladder";
+    if(layer.includes("L3")) return "L3 — resistance exit";
+    if(layer.includes("L4")) return "L4 — resistance short";
+    if(layer.includes("L5")) return "L5 — opening drop / RSI<20";
+    if(layer.includes("L6")) return "L6 — resistance short";
+    if(note.includes("MA") || note.includes("CROSS")) return "MA crossover signal";
+    if(trade.type==="BUY")   return "Signal — entry";
+    if(trade.type==="SELL")  return "Signal — exit";
+    if(trade.type==="SHORT") return "Signal — short";
+    if(trade.type==="COVER") return "Signal — cover";
+    return "—";
+  }
+
+  // ── Build rows ────────────────────────────────────────────────────────────
+  let tradeNum = 0;
+  const rows = pairs.map(p=>{
+    tradeNum++;
+    const win   = p.gross !== null && p.gross >= 0;
+    const pnlCol= p.gross === null ? "#3d5470" : win ? "#22c55e" : "#ef4444";
+    const pnlStr= p.gross === null ? "OPEN" : (p.gross>=0?"+":"")+"$"+p.gross.toFixed(2);
+    const pctStr= (p.gross !== null && p.buy.price > 0)
+      ? ((p.gross/(p.buy.price*p.qty))*100).toFixed(2)+"%" : "";
+
+    const buyReason  = guessReason(p.buy);
+    const sellReason = p.sell ? guessReason(p.sell) : "—";
+    const sym = (p.buy.note||"").slice(0,15) || "—";
+
+    // Direction badge
+    const kindCol = p.kind==="LONG" ? "#22c55e" : "#f97316";
+    const kindLbl = p.kind==="LONG" ? "▲ LONG" : "▽ SHORT";
+
+    return `
+    <div style="background:#080c14;border:1px solid #1a2540;border-radius:8px;margin-bottom:10px;overflow:hidden">
+      <!-- Trade header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#0e1420;border-bottom:1px solid #1a2540">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:10px;color:#3d5470;font-weight:700">TRADE #${tradeNum}</span>
+          <span style="background:${kindCol}22;color:${kindCol};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">${kindLbl}</span>
+          <span style="color:#4a6880;font-size:11px">${sym}</span>
+          <span style="color:#3d5470;font-size:10px">× ${p.qty} shares</span>
+        </div>
+        <span style="color:${pnlCol};font-weight:900;font-size:15px;font-family:monospace">${pnlStr}${pctStr?" <span style='font-size:11px;opacity:.7'>(${pctStr})</span>":""}</span>
+      </div>
+      <!-- Buy row -->
+      <div style="display:grid;grid-template-columns:60px 55px 1fr 110px;gap:0;align-items:center;padding:9px 14px;border-bottom:1px solid #1a254033">
+        <span style="color:#22c55e;font-size:10px;font-weight:700">${p.kind==="SHORT"?"SHORT":"BUY"}</span>
+        <span style="color:#3d5470;font-size:11px;font-family:monospace">${p.buy.time}</span>
+        <span style="color:#7ca0c0;font-size:11px">${buyReason}</span>
+        <span style="color:#22c55e;font-family:monospace;font-size:13px;font-weight:700;text-align:right">$${p.buy.price.toFixed(2)}</span>
+      </div>
+      <!-- Sell row -->
+      <div style="display:grid;grid-template-columns:60px 55px 1fr 110px;gap:0;align-items:center;padding:9px 14px;${p.gross===null?'opacity:.4':''}">
+        <span style="color:#f87171;font-size:10px;font-weight:700">${p.sell?(p.kind==="SHORT"?"COVER":"SELL"):"OPEN"}</span>
+        <span style="color:#3d5470;font-size:11px;font-family:monospace">${p.sell?p.sell.time:"—"}</span>
+        <span style="color:#7ca0c0;font-size:11px">${p.sell?sellReason:"position still open"}</span>
+        <span style="color:${p.sell?"#f87171":"#3d5470"};font-family:monospace;font-size:13px;font-weight:700;text-align:right">${p.sell?"$"+p.sell.price.toFixed(2):"—"}</span>
+      </div>
+    </div>`;
   }).join("");
+
+  // ── Summary footer ────────────────────────────────────────────────────────
+  const wins   = pairs.filter(p=>p.gross!==null&&p.gross>0).length;
+  const losses = pairs.filter(p=>p.gross!==null&&p.gross<0).length;
+  const closed = wins+losses;
+  const winRate= closed>0?((wins/closed)*100).toFixed(0)+"%":"—";
+
   document.getElementById("tbl").innerHTML=`
     <div style="background:#0e1420;border-radius:10px;padding:16px 18px;border:1px solid #1a2540;margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <span style="font-weight:700;font-size:13px;letter-spacing:1px">EXECUTIONS</span>
-        <span style="color:${pnl>=0?"#22c55e":"#ef4444"};font-weight:700;font-size:14px">${pnl>=0?"+":""}$${pnl.toFixed(2)} P&L</span>
+        <div style="display:flex;gap:16px;align-items:center">
+          <span style="font-size:10px;color:#3d5470">${wins}W / ${losses}L · Win rate ${winRate}</span>
+          <span style="color:${totalPnl>=0?"#22c55e":"#ef4444"};font-weight:900;font-size:16px;font-family:monospace">${totalPnl>=0?"+":""}$${totalPnl.toFixed(2)} P&L</span>
+        </div>
       </div>
-      <div style="overflow-x:auto"><table><thead><tr>
-        ${["Time","Layer","Type","Qty / Note","Price","Better","Edge"].map(h=>`<th>${h}</th>`).join("")}
-      </tr></thead><tbody>${rows||"<tr><td colspan='7' style='color:#3d5470;padding:12px 10px'>No orders found for this date</td></tr>"}</tbody></table></div>
+      ${rows||"<div style='color:#3d5470;padding:20px;text-align:center'>No orders found for this date</div>"}
+      <!-- Total bar -->
+      <div style="margin-top:14px;padding:12px 16px;border-radius:8px;background:${totalPnl>=0?"#22c55e0d":"#ef44440d"};border:1px solid ${totalPnl>=0?"#22c55e33":"#ef444433"};display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;color:#7ca0c0;letter-spacing:1px">TOTAL REALIZED P&L — ${closed} closed trade${closed!==1?"s":""}</span>
+        <span style="font-size:20px;font-weight:900;font-family:monospace;color:${totalPnl>=0?"#22c55e":"#ef4444"}">${totalPnl>=0?"+":""}$${totalPnl.toFixed(2)}</span>
+      </div>
     </div>`;
 }
 
