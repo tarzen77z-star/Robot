@@ -35,6 +35,7 @@ td{padding:6px 10px}
     <input id="sym" class="inp" value="MSTR" style="width:72px"/>
     <input id="dt" class="inp" type="date"/>
     <button id="loadBtn" class="btn" onclick="load()">LOAD</button>
+    <button id="allBtn" class="btn" onclick="loadAll()" style="background:#0e7490">ALL 4 ↓</button>
   </div>
 </div>
 
@@ -44,6 +45,16 @@ td{padding:6px 10px}
 </div>
 
 <div id="statsRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
+
+<div id="execFilterRow" style="display:none;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+  <span style="font-size:10px;color:#3d5470;margin-right:4px;letter-spacing:1px">EXEC:</span>
+  <button onclick="toggleExecFilter('ALL')"  id="ef-ALL"  style="background:#fbbf24;color:#080c14;border:1px solid #fbbf24;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer;font-weight:900">ALL</button>
+  <button onclick="toggleExecFilter('MSTR')" id="ef-MSTR" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">MSTR</button>
+  <button onclick="toggleExecFilter('META')" id="ef-META" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">META</button>
+  <button onclick="toggleExecFilter('TSLA')" id="ef-TSLA" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">TSLA</button>
+  <button onclick="toggleExecFilter('NFLX')" id="ef-NFLX" style="background:#1a2540;color:#6b90b0;border:1px solid #1a2540;border-radius:5px;padding:4px 12px;font-size:11px;font-family:monospace;cursor:pointer">NFLX</button>
+  <span id="execFilterCount" style="font-size:10px;color:#3d5470;margin-left:6px"></span>
+</div>
 
 <div id="filterRow" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
   <span style="font-size:10px;color:#3d5470;margin-right:4px;letter-spacing:1px">CHART:</span>
@@ -233,8 +244,16 @@ function renderAll(){
 }
 
 function buildTable(){
+  // Apply exec filter — independent of chart filter
+  const srcTrades = EXEC_FILTER === 'ALL'
+    ? ALL_TRADES
+    : ALL_TRADES.filter(t => (t.note||'').toUpperCase().startsWith(EXEC_FILTER));
+
+  const execCount = document.getElementById('execFilterCount');
+  if (execCount) execCount.textContent = EXEC_FILTER === 'ALL' ? `${ALL_TRADES.length} trades` : `${srcTrades.length} of ${ALL_TRADES.length}`;
+
   // ── Pair buys → sells (FIFO) and shorts → covers ──────────────────────────
-  const sorted = [...TRADES].sort((a,b)=>a.time.localeCompare(b.time));
+  const sorted = [...srcTrades].sort((a,b)=>a.time.localeCompare(b.time));
   const buyQ   = sorted.filter(t=>t.type==="BUY");
   const shortQ = sorted.filter(t=>t.type==="SHORT");
   const pairs  = [];
@@ -265,69 +284,82 @@ function buildTable(){
   // Sort pairs by buy time
   pairs.sort((a,b)=>a.buy.time.localeCompare(b.buy.time));
 
-  const totalPnl = pairs.reduce((s,p)=>s+(p.gross||0), 0);
+  const totalPnl = pairs.reduce((s,p)=>{
+    if(p.gross===null) return s;
+    const mult = (p.buy.isOption||false) ? 100 : 1;
+    return s + p.gross * mult;
+  }, 0);
 
-  // ── Reason heuristic ──────────────────────────────────────────────────────
+  // ── Reason from client_order_id (what the strategy actually sent) ────────
   function guessReason(trade){
-    const note = (trade.note||"").toUpperCase();
+    const cid   = (trade.cid||"").toLowerCase();
     const layer = (trade.layer||"").toUpperCase();
-    if(layer.includes("L1")) return "L1 — pivot support buy";
-    if(layer.includes("L2")) return "L2 — $5 drop ladder";
-    if(layer.includes("L3")) return "L3 — resistance exit";
-    if(layer.includes("L4")) return "L4 — resistance short";
-    if(layer.includes("L5")) return "L5 — opening drop / RSI<20";
-    if(layer.includes("L6")) return "L6 — resistance short";
-    if(note.includes("MA") || note.includes("CROSS")) return "MA crossover signal";
-    if(trade.type==="BUY")   return "Signal — entry";
-    if(trade.type==="SELL")  return "Signal — exit";
-    if(trade.type==="SHORT") return "Signal — short";
-    if(trade.type==="COVER") return "Signal — cover";
-    return "—";
+    // Use raw cid text if it has useful info
+    if(cid.includes("eod"))          return "EOD close";
+    if(cid.includes("l1")||layer==="L1") return "L1 — pivot support";
+    if(cid.includes("l2")||layer==="L2") return "L2 — $5 drop ladder";
+    if(cid.includes("l3")||layer==="L3") return "L3 — near resistance";
+    if(cid.includes("l4")||layer==="L4") return "L4 — resistance short";
+    if(cid.includes("l5")||layer==="L5") return "L5 — open drop / RSI<20";
+    if(cid.includes("l6")||layer==="L6") return "L6 — resistance short";
+    if(cid.includes("profit"))           return "Profit target hit";
+    if(cid.includes("stop"))             return "Stop loss hit";
+    if(cid.includes("cross")||cid.includes("ma")) return "MA crossover";
+    if(cid.includes("rsi"))              return "RSI signal";
+    if(cid.includes("support"))          return "Support level";
+    if(cid.includes("resist"))           return "Resistance level";
+    // Fallback — show first 30 chars of cid if available
+    if(cid.length > 3) return cid.slice(0,30);
+    return trade.type==="BUY" ? "Entry signal" : "Exit signal";
   }
 
   // ── Build rows ────────────────────────────────────────────────────────────
-  // Table header
+  // 12 columns: # | DIR | SYM | QTY | B.TIME | BUY $ | BUY AMT | S.TIME | SELL $ | SELL AMT | REASON | P&L
+  const COL = "32px 52px 52px 36px 50px 68px 74px 50px 68px 74px 1fr 110px";
   const thead = `
-    <div style="display:grid;grid-template-columns:90px 80px 90px 90px 90px 1fr 100px;gap:0;padding:6px 14px;border-bottom:1px solid #1a2540;margin-bottom:4px">
-      ${["TRADE","BUY TIME","BUY PRICE","SELL TIME","SELL PRICE","REASON","P&L"].map(h=>
-        `<span style="font-size:9px;color:#3d5470;font-weight:700;letter-spacing:1px">${h}</span>`
+    <div style="display:grid;grid-template-columns:${COL};gap:0 6px;padding:5px 12px;border-bottom:1px solid #1a2540;margin-bottom:2px">
+      ${["#","DIR","SYM","QTY","B.TIME","BUY $","BUY AMT","S.TIME","SELL $","SELL AMT","REASON","P&L"].map(h=>
+        `<span style="font-size:9px;color:#3d5470;font-weight:700;letter-spacing:.5px">${h}</span>`
       ).join("")}
     </div>`;
 
   let tradeNum = 0;
   const rows = pairs.map(p=>{
     tradeNum++;
-    const win    = p.gross !== null && p.gross >= 0;
-    const pnlCol = p.gross === null ? "#3d5470" : win ? "#22c55e" : "#ef4444";
-    const pnlStr = p.gross === null ? "OPEN" : (p.gross>=0?"+":"")+"$"+p.gross.toFixed(2);
-    const pctStr = (p.gross !== null && p.buy.price > 0)
-      ? " ("+((p.gross/(p.buy.price*p.qty))*100).toFixed(1)+"%)" : "";
-    const reason = guessReason(p.buy);
-    const sym    = (p.buy.note||"").split(/[0-9]/)[0].slice(0,6) || "—";
-    const kindCol= p.kind==="LONG" ? "#22c55e" : "#f97316";
-    const kindLbl= p.kind==="LONG" ? "▲ LONG" : "▽ SHORT";
-    const rowBg  = tradeNum%2===0 ? "#0a0f1a" : "transparent";
+    // Options: price is per-share, qty is contracts — multiply by 100 for real $ value
+    const isOpt   = p.buy.isOption || false;
+    const mult    = isOpt ? 100 : 1;
+    const buyAmt  = p.buy.price  * p.qty * mult;
+    const sellAmt = p.sell ? p.sell.price * p.qty * mult : null;
+    const gross   = p.gross !== null ? p.gross * mult : null;  // fix options P&L
+
+    const win    = gross !== null && gross >= 0;
+    const pnlCol = gross === null ? "#3d5470" : win ? "#22c55e" : "#ef4444";
+    const pnlStr = gross === null ? "OPEN" : (gross>=0?"+":"")+"$"+gross.toFixed(2);
+    const pctStr = (gross !== null && buyAmt > 0)
+      ? " ("+(( gross / buyAmt)*100).toFixed(1)+"%)" : "";
+    const reason  = guessReason(p.buy);
+    const sym     = (p.buy.note||"").split(/[0-9]/)[0].slice(0,5) || "—";
+    const kindCol = p.kind==="LONG" ? "#22c55e" : "#f97316";
+    const kindLbl = p.kind==="LONG" ? "▲ L" : "▽ S";
+    const rowBg   = tradeNum%2===0 ? "#0a0f1a" : "transparent";
+
+    const fmtAmt = v => v===null ? "—" : "$"+v.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 
     return `
-    <div style="display:grid;grid-template-columns:90px 80px 90px 90px 90px 1fr 100px;gap:0;align-items:center;padding:8px 14px;background:${rowBg};border-radius:4px">
-      <!-- Trade # + badge -->
-      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-        <span style="font-size:10px;color:#3d5470">#${tradeNum}</span>
-        <span style="background:${kindCol}22;color:${kindCol};border-radius:3px;padding:1px 6px;font-size:10px;font-weight:700">${kindLbl}</span>
-        <span style="color:#4a6880;font-size:10px">${sym}×${p.qty}</span>
-      </div>
-      <!-- Buy time -->
-      <span style="color:#22c55e;font-family:monospace;font-size:12px">${p.buy.time}</span>
-      <!-- Buy price -->
-      <span style="color:#22c55e;font-family:monospace;font-size:13px;font-weight:700">$${p.buy.price.toFixed(2)}</span>
-      <!-- Sell time -->
-      <span style="color:${p.sell?"#f87171":"#3d5470"};font-family:monospace;font-size:12px">${p.sell?p.sell.time:"—"}</span>
-      <!-- Sell price -->
-      <span style="color:${p.sell?"#f87171":"#3d5470"};font-family:monospace;font-size:13px;font-weight:700">${p.sell?"$"+p.sell.price.toFixed(2):"—"}</span>
-      <!-- Reason -->
-      <span style="color:#4a6880;font-size:11px">${reason}</span>
-      <!-- P&L -->
-      <span style="color:${pnlCol};font-family:monospace;font-size:13px;font-weight:900;text-align:right">${pnlStr}<span style="font-size:10px;opacity:.7">${pctStr}</span></span>
+    <div style="display:grid;grid-template-columns:${COL};gap:0 6px;align-items:center;padding:7px 12px;background:${rowBg};border-radius:3px">
+      <span style="color:#3d5470;font-size:11px;font-family:monospace">${tradeNum}</span>
+      <span style="background:${kindCol}22;color:${kindCol};border-radius:3px;padding:1px 5px;font-size:10px;font-weight:700;text-align:center">${kindLbl}${isOpt?"<span style='font-size:8px;opacity:.6'> OPT</span>":""}</span>
+      <span style="color:#7ca0c0;font-size:11px;font-weight:700">${sym}</span>
+      <span style="color:#3d5470;font-size:11px">${p.qty}${isOpt?"c":""}</span>
+      <span style="color:#22c55e;font-family:monospace;font-size:11px">${p.buy.time}</span>
+      <span style="color:#22c55e;font-family:monospace;font-size:12px;font-weight:700">$${p.buy.price.toFixed(2)}</span>
+      <span style="color:#22c55e88;font-family:monospace;font-size:11px">${fmtAmt(buyAmt)}</span>
+      <span style="color:${p.sell?"#f87171":"#3d5470"};font-family:monospace;font-size:11px">${p.sell?p.sell.time:"—"}</span>
+      <span style="color:${p.sell?"#f87171":"#3d5470"};font-family:monospace;font-size:12px;font-weight:700">${p.sell?"$"+p.sell.price.toFixed(2):"—"}</span>
+      <span style="color:${p.sell?"#f8717188":"#3d5470"};font-family:monospace;font-size:11px">${fmtAmt(sellAmt)}</span>
+      <span style="color:#4a6880;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${reason}</span>
+      <span style="color:${pnlCol};font-family:monospace;font-size:12px;font-weight:900;text-align:right">${pnlStr}<span style="font-size:9px;opacity:.6">${pctStr}</span></span>
     </div>`;
   }).join("");
 
@@ -404,11 +436,15 @@ window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
 let ACTIVE_FILTER = 'ALL';
 let ALL_TRADES = [];
 let ALL_BETTER = [];
+let EXEC_FILTER = 'ALL';          // independent exec table filter
+let BARS_BY_SYM = {};             // {MSTR:[...], META:[...], ...}
+let TRADES_BY_SYM = {};           // raw trades per symbol
+let BETTER_BY_SYM = {};
 
 function toggleFilter(ticker) {
   ACTIVE_FILTER = ticker;
 
-  // Update button styles
+  // Update chart filter button styles
   ['ALL','MSTR','TSLA','NFLX','META'].forEach(t => {
     const btn = document.getElementById('f-'+t);
     if (!btn) return;
@@ -427,116 +463,272 @@ function toggleFilter(ticker) {
     }
   });
 
-  // Change symbol input for the selected ticker
+  // If we have multi-symbol bars loaded, switch chart without refetching
+  if (Object.keys(BARS_BY_SYM).length > 1) {
+    const sym = ticker === 'ALL' ? 'MSTR' : ticker;
+    BARS = BARS_BY_SYM[sym] || [];
+    document.getElementById('sym').value = sym;
+    const badge = document.getElementById('activeTicker');
+    if (badge) { badge.textContent = ticker === 'ALL' ? 'ALL' : sym; badge.style.display='block'; }
+    if (BARS.length) renderAll();
+    // Don't rebuild table — exec filter is independent
+    return;
+  }
+
+  // Single symbol mode — reload chart
   if (ticker !== 'ALL') {
     document.getElementById('sym').value = ticker;
-    load();  // reload chart for this ticker
+    load();
   } else {
     applyFilter();
   }
 }
 
 function applyFilter() {
+  // Chart filter — switches the chart to show that symbol's bars
   if (ACTIVE_FILTER === 'ALL') {
+    // Show MSTR bars by default when ALL selected
+    BARS = BARS_BY_SYM['MSTR'] || [];
     TRADES = ALL_TRADES;
     BETTER = ALL_BETTER;
   } else {
-    // Filter by symbol — note field matches the order symbol
+    BARS = BARS_BY_SYM[ACTIVE_FILTER] || [];
     TRADES = ALL_TRADES.filter(t => {
-      const sym = (t.note || t.symbol || '').toUpperCase();
+      const sym = (t.note || '').toUpperCase();
       return sym.startsWith(ACTIVE_FILTER);
     });
     BETTER = ALL_BETTER.filter(t => {
-      const sym = (t.note || t.symbol || '').toUpperCase();
+      const sym = (t.note || '').toUpperCase();
       return sym.startsWith(ACTIVE_FILTER);
     });
   }
-  const cnt = TRADES.length;
-  const el = document.getElementById('filterCount');
-  if (el) el.textContent = ACTIVE_FILTER === 'ALL' ? '' : `${cnt} trades`;
-  renderAll();
+  if (BARS.length) renderAll();
   buildTable();
 }
 
-async function load(){
-  // Get keys — use saved ones if fields are empty (happens on ticker switch)
-  const akField=document.getElementById("ak").value.trim();
-  const skField=document.getElementById("sk").value.trim();
-  if(akField) sessionStorage.setItem("ak",akField);
-  if(skField) sessionStorage.setItem("sk",skField);
-  const ak=akField||sessionStorage.getItem("ak")||"";
-  const sk=skField||sessionStorage.getItem("sk")||"";
-  const sym=document.getElementById("sym").value.trim()||"MSTR";
-  const dt=document.getElementById("dt").value;
-  if(!ak||!sk){alert("Please enter your Alpaca paper trading API Key ID and Secret Key.");return;}
-  if(!dt){alert("Please pick a date.");return;}
-  const btn=document.getElementById("loadBtn");btn.disabled=true;btn.textContent="...";
-  document.getElementById("msg").style.display="none";
-  try{
-    const h={"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
-    const s=encodeURIComponent(dt+"T06:00:00-04:00"),e=encodeURIComponent(dt+"T16:00:00-04:00");
-    const [bR,aR,oR]=await Promise.all([
+// ── Execution table filter (independent of chart) ─────────────────────────
+function toggleExecFilter(sym) {
+  EXEC_FILTER = sym;
+  ['ALL','MSTR','META','TSLA','NFLX'].forEach(t => {
+    const btn = document.getElementById('ef-'+t);
+    if (!btn) return;
+    const active = t === sym;
+    btn.style.background = active ? '#fbbf24' : '#1a2540';
+    btn.style.color      = active ? '#080c14' : '#6b90b0';
+    btn.style.border     = active ? '1px solid #fbbf24' : '1px solid #1a2540';
+    btn.style.fontWeight = active ? '900' : 'normal';
+  });
+  buildTable();
+}
+
+// ── Parse orders into trade objects ───────────────────────────────────────
+function parseOrders(orders) {
+  let buys = 0, sells = 0;
+  const trades = orders.map(o => {
+    const t = new Date(o.filled_at || o.submitted_at);
+    const hh = t.getHours().toString().padStart(2,"0");
+    const mm = t.getMinutes().toString().padStart(2,"0");
+    const isOption = o.symbol.length > 5;
+    const type = o.side === "buy" ? "BUY" : "SELL";
+    if (o.side === "buy") buys++; else sells++;
+    const cid = (o.client_order_id||"").toLowerCase();
+    let layer = "";
+    if(/l6/.test(cid)) layer="L6";
+    else if(/l5/.test(cid)) layer="L5";
+    else if(/l4/.test(cid)) layer="L4";
+    else if(/l3/.test(cid)) layer="L3";
+    else if(/l2/.test(cid)) layer="L2";
+    else if(/l1/.test(cid)) layer="L1";
+    return { type, layer, cid: o.client_order_id||"", qty: parseFloat(o.filled_qty),
+             price: parseFloat(o.filled_avg_price||0), time: `${hh}:${mm}`,
+             note: o.symbol, isOption };
+  });
+  return { trades, buys, sells };
+}
+
+// ── Fetch bars + enrich for one symbol ────────────────────────────────────
+function enrichBars(rawBars) {
+  const allBars = enrich(rawBars.map(b => {
+    const utc = new Date(b.t);
+    const et  = new Date(utc.toLocaleString("en-US",{timeZone:"America/New_York"}));
+    const hh  = et.getHours().toString().padStart(2,"0");
+    const mm  = et.getMinutes().toString().padStart(2,"0");
+    return { time:`${hh}:${mm}`, open:b.o, close:b.c, high:b.h, low:b.l, volume:b.v };
+  }));
+  return allBars.filter(b => {
+    const [hh,mm] = b.time.split(":").map(Number);
+    const mins = hh*60+mm;
+    return mins >= 570 && mins <= 960;
+  });
+}
+
+// ── Load single symbol (original LOAD button) ─────────────────────────────
+async function load() {
+  const akField = document.getElementById("ak").value.trim();
+  const skField = document.getElementById("sk").value.trim();
+  if (akField) sessionStorage.setItem("ak", akField);
+  if (skField) sessionStorage.setItem("sk", skField);
+  const ak  = akField || sessionStorage.getItem("ak") || "";
+  const sk  = skField || sessionStorage.getItem("sk") || "";
+  const sym = document.getElementById("sym").value.trim() || "MSTR";
+  const dt  = document.getElementById("dt").value;
+  if (!ak||!sk) { alert("Please enter your Alpaca paper trading API Key ID and Secret Key."); return; }
+  if (!dt)      { alert("Please pick a date."); return; }
+  const btn = document.getElementById("loadBtn");
+  btn.disabled = true; btn.textContent = "...";
+  document.getElementById("msg").style.display = "none";
+  try {
+    const h = {"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
+    const s = encodeURIComponent(dt+"T06:00:00-04:00"), e = encodeURIComponent(dt+"T16:00:00-04:00");
+    const [bR,aR,oR] = await Promise.all([
       fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=800`,{headers:h}),
       fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
       fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=200`,{headers:h})
     ]);
-    const bj=await bR.json(),aj=await aR.json(),oj=await oR.json();
-    if(bj.code||bj.message?.toLowerCase().includes("unauthorized")){alert("API keys rejected. Check your Alpaca paper trading Key ID and Secret Key.");btn.disabled=false;btn.textContent="LOAD";return;}
-    if(!bj.bars?.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
-    // Enrich ALL bars (including pre-market) so MAs are warmed up
-    const allBars=enrich(bj.bars.map(b=>{
-      // Convert UTC timestamp to ET (Eastern Time)
-      const utc=new Date(b.t);
-      const et=new Date(utc.toLocaleString("en-US",{timeZone:"America/New_York"}));
-      const hh=et.getHours().toString().padStart(2,"0");
-      const mm=et.getMinutes().toString().padStart(2,"0");
-      return{time:`${hh}:${mm}`,open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v};
-    }));
-    // Display only market hours 9:30am-4:00pm — MAs already calculated
-    BARS=allBars.filter(b=>{
-      const [hh,mm]=b.time.split(":").map(Number);
-      const mins=hh*60+mm;
-      return mins>=570&&mins<=960; // 9:30am to 4:00pm
+    const bj = await bR.json(), aj = await aR.json(), oj = await oR.json();
+    if (bj.code || bj.message?.toLowerCase().includes("unauthorized")) {
+      alert("API keys rejected."); btn.disabled=false; btn.textContent="LOAD"; return;
+    }
+    if (!bj.bars?.length) {
+      alert(`No data for ${sym} on ${dt}.`); btn.disabled=false; btn.textContent="LOAD"; return;
+    }
+    const bars   = enrichBars(bj.bars);
+    const orders = (Array.isArray(oj)?oj:[]).filter(o => {
+      const os = (o.symbol||"").toUpperCase();
+      return os === sym.toUpperCase() || os.startsWith(sym.toUpperCase());
     });
-    // True day P&L = portfolio value change since yesterday close
+    const { trades, buys, sells } = parseOrders(orders);
+
+    // Store single symbol
+    BARS_BY_SYM   = { [sym]: bars };
+    TRADES_BY_SYM = { [sym]: trades };
+    BETTER_BY_SYM = { [sym]: betterEntries(bars, trades) };
+    BARS    = bars;
+    TRADES  = trades;
+    BETTER  = betterEntries(bars, trades);
+    ALL_TRADES = [...TRADES];
+    ALL_BETTER = [...BETTER];
+
+    // Hide exec filter row (single symbol mode)
+    document.getElementById('execFilterRow').style.display = 'none';
+
+    // Chart filter buttons
+    ['MSTR','TSLA','NFLX','META'].forEach(t => {
+      const b = document.getElementById('f-'+t);
+      if (b) b.style.display = t === sym ? 'block' : 'none';
+    });
+    ACTIVE_FILTER = sym;
+    EXEC_FILTER   = 'ALL';
+    renderAll();
+    buildTable();
+
+    const badge = document.getElementById('activeTicker');
+    if (badge) { badge.textContent = sym; badge.style.display = 'block'; }
     const equity = parseFloat(aj.equity || aj.portfolio_value || 0);
     const lastEq = parseFloat(aj.last_equity || equity);
-    const pnl    = equity - lastEq;
-    let buys=0,sells=0;
-    // Filter orders to only the loaded symbol (orders API returns ALL tickers)
-    const filteredOrders=(Array.isArray(oj)?oj:[]).filter(o=>{
-      const orderSym=(o.symbol||"").toUpperCase();
-      // Match exact symbol OR option contracts (e.g. TSLA260529C...)
-      return orderSym===sym.toUpperCase() || orderSym.startsWith(sym.toUpperCase());
-    });
-    TRADES=filteredOrders.map(o=>{
-      const t=new Date(o.filled_at||o.submitted_at);
-      const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
-      const isOption=o.symbol.length>5;
-      let type=o.side==="buy"?"BUY":"SELL";
-      if(isOption) type=o.side==="buy"?"BUY":"SELL";
-      if(o.side==="buy"){buys++;}else{sells++;}
-      return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
-    });
-    BETTER=betterEntries(BARS,TRADES);
-    ALL_TRADES=[...TRADES];
-    ALL_BETTER=[...BETTER];
-    // Auto-detect tickers and show relevant filter buttons
-    const tickers = new Set(ALL_TRADES.map(t=>(t.note||'').split(/[0-9]/)[0].toUpperCase()).filter(t=>t.length>=2&&t.length<=5));
-    ['MSTR','TSLA','NFLX','META'].forEach(t=>{
-      const btn=document.getElementById('f-'+t);
-      if(btn) btn.style.display = tickers.has(t) ? 'block' : 'none';
-    });
-    ACTIVE_FILTER='ALL';
-    toggleFilter('ALL');
-    // Show active ticker badge
-    const badge=document.getElementById('activeTicker');
-    if(badge){badge.textContent=sym;badge.style.display='block';}
-    buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},{pnl,buys,sells,count:TRADES.length},dt);
-  }catch(err){
-    alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
+    buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},
+               {pnl:equity-lastEq,buys,sells,count:TRADES.length},dt);
+  } catch(err) {
+    alert("Error loading data:\n"+err.message);
   }
-  btn.disabled=false;btn.textContent="LOAD";
+  btn.disabled=false; btn.textContent="LOAD";
+}
+
+// ── Load ALL 4 symbols in parallel ────────────────────────────────────────
+async function loadAll() {
+  const akField = document.getElementById("ak").value.trim();
+  const skField = document.getElementById("sk").value.trim();
+  if (akField) sessionStorage.setItem("ak", akField);
+  if (skField) sessionStorage.setItem("sk", skField);
+  const ak = akField || sessionStorage.getItem("ak") || "";
+  const sk = skField || sessionStorage.getItem("sk") || "";
+  const dt = document.getElementById("dt").value;
+  if (!ak||!sk) { alert("Please enter your Alpaca paper trading API Key ID and Secret Key."); return; }
+  if (!dt)      { alert("Please pick a date."); return; }
+
+  const btn = document.getElementById("allBtn");
+  btn.disabled = true; btn.textContent = "LOADING...";
+  document.getElementById("msg").style.display = "none";
+
+  const h = {"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
+  const s = encodeURIComponent(dt+"T06:00:00-04:00"), e = encodeURIComponent(dt+"T16:00:00-04:00");
+  const SYMS = ['MSTR','META','TSLA','NFLX'];
+
+  try {
+    // Fetch account + all bars + orders in parallel
+    const [acctR, ordersR, ...barsRs] = await Promise.all([
+      fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
+      fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=500`,{headers:h}),
+      ...SYMS.map(sym => fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=800`,{headers:h}))
+    ]);
+
+    const aj     = await acctR.json();
+    const oj     = await ordersR.json();
+    const barsJs = await Promise.all(barsRs.map(r => r.json()));
+
+    if (aj.code || String(aj.message||"").toLowerCase().includes("unauthorized")) {
+      alert("API keys rejected."); btn.disabled=false; btn.textContent="ALL 4 ↓"; return;
+    }
+
+    // Build per-symbol data
+    BARS_BY_SYM = {}; TRADES_BY_SYM = {}; BETTER_BY_SYM = {};
+    const allOrders = Array.isArray(oj) ? oj : [];
+    let totalBuys = 0, totalSells = 0;
+
+    SYMS.forEach((sym, i) => {
+      const bj = barsJs[i];
+      if (bj.bars?.length) {
+        BARS_BY_SYM[sym] = enrichBars(bj.bars);
+      } else {
+        BARS_BY_SYM[sym] = [];
+      }
+      const symOrders = allOrders.filter(o => {
+        const os = (o.symbol||"").toUpperCase();
+        return os === sym || os.startsWith(sym);
+      });
+      const { trades, buys, sells } = parseOrders(symOrders);
+      TRADES_BY_SYM[sym] = trades;
+      BETTER_BY_SYM[sym] = BARS_BY_SYM[sym].length ? betterEntries(BARS_BY_SYM[sym], trades) : [];
+      totalBuys += buys; totalSells += sells;
+    });
+
+    // ALL_TRADES = every trade across all symbols, sorted by time
+    ALL_TRADES = SYMS.flatMap(sym => TRADES_BY_SYM[sym] || []).sort((a,b)=>a.time.localeCompare(b.time));
+    ALL_BETTER = SYMS.flatMap(sym => BETTER_BY_SYM[sym]  || []);
+
+    // Default: show MSTR chart, all trades in exec table
+    BARS   = BARS_BY_SYM['MSTR'] || [];
+    TRADES = ALL_TRADES;
+    BETTER = ALL_BETTER;
+    ACTIVE_FILTER = 'MSTR';
+    EXEC_FILTER   = 'ALL';
+
+    // Show chart filter buttons for symbols that have data
+    ['MSTR','TSLA','NFLX','META'].forEach(t => {
+      const b = document.getElementById('f-'+t);
+      if (b) b.style.display = (BARS_BY_SYM[t]?.length) ? 'block' : 'none';
+    });
+    // Highlight MSTR in chart filter
+    toggleFilter('MSTR');
+
+    // Show exec filter row
+    document.getElementById('execFilterRow').style.display = 'flex';
+    toggleExecFilter('ALL');
+
+    const badge = document.getElementById('activeTicker');
+    if (badge) { badge.textContent = 'ALL'; badge.style.display = 'block'; }
+
+    if (BARS.length) renderAll();
+    buildTable();
+
+    const equity = parseFloat(aj.equity || aj.portfolio_value || 0);
+    const lastEq = parseFloat(aj.last_equity || equity);
+    buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},
+               {pnl:equity-lastEq,buys:totalBuys,sells:totalSells,count:ALL_TRADES.length},dt);
+  } catch(err) {
+    alert("Error loading data:\n"+err.message);
+  }
+  btn.disabled=false; btn.textContent="ALL 4 ↓";
 }
 
 document.getElementById("dt").value=new Date().toISOString().split("T")[0];
