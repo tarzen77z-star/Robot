@@ -102,8 +102,17 @@ const MU={BUY:true,SELL:false,SHORT:false,COVER:true,
 function sma(d,p){return d.map((b,i)=>{if(i<p-1)return{...b,[`ma${p}`]:null};const a=d.slice(i-p+1,i+1).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ma${p}`]:+a.toFixed(2)};});}
 function rsi(d,p=14){const c=d.map(x=>x.close);return d.map((b,i)=>{if(i<p)return{...b,rsi:null};let g=0,l=0;for(let j=i-p+1;j<=i;j++){const df=c[j]-c[j-1];df>0?g+=df:l-=df;}const rs=l===0?100:g/l;return{...b,rsi:+(100-100/(1+rs)).toFixed(2)};});}
 function macd(d){const c=d.map(x=>x.close);const ema=(a,p)=>{const k=2/(p+1),r=[a[0]];for(let i=1;i<a.length;i++)r.push(a[i]*k+r[i-1]*(1-k));return r;};const ml=ema(c,12).map((v,i)=>v-ema(c,26)[i]);const sig=ema(ml.slice(26),9);return d.map((b,i)=>({...b,macd:i>=26?+(ml[i]).toFixed(3):null,signal:i>=34?+(sig[i-26]).toFixed(3):null,hist:i>=34?+(ml[i]-sig[i-26]).toFixed(3):null}));}
-function ema(d,p){const k=2/(p+1);return d.map((b,i)=>{if(i===0)return{...b,[`ema${p}`]:+b.close.toFixed(2)};const prev=d[i-1][`ema${p}`]??b.close;return{...b,[`ema${p}`]:+(b.close*k+prev*(1-k)).toFixed(2)};});}
-function bbands(d,p=20,mult=2){return d.map((b,i)=>{if(i<p-1)return{...b,bb_upper:null,bb_mid:null,bb_lower:null};const sl=d.slice(i-p+1,i+1);const mid=sl.reduce((s,x)=>s+x.close,0)/p;const std=Math.sqrt(sl.reduce((s,x)=>s+(x.close-mid)**2,0)/p);return{...b,bb_upper:+(mid+mult*std).toFixed(2),bb_mid:+(mid).toFixed(2),bb_lower:+(mid-mult*std).toFixed(2)};});}
+function ema(d,p){const k=2/(p+1);let seed=null;return d.map((b,i)=>{if(i<p-1)return{...b,[`ema${p}`]:null};if(i===p-1){seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ema${p}`]:+seed.toFixed(2)};}const prev=d[i-1][`ema${p}`]??seed??b.close;seed=b.close*k+prev*(1-k);return{...b,[`ema${p}`]:+seed.toFixed(2)};});}`]:null};
+    if(i===p-1){
+      seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;
+      return{...b,[`ema${p}`]:+seed.toFixed(2)};
+    }
+    const prev=d[i-1][`ema${p}`]??seed??b.close;
+    seed=b.close*k+prev*(1-k);
+    return{...b,[`ema${p}`]:+seed.toFixed(2)};
+  });
+}
+
 function enrich(b){let d=sma(b,20);d=sma(d,50);d=sma(d,200);d=ema(d,50);d=rsi(d);return macd(d);}
 
 function betterEntries(bars,trades){
@@ -454,8 +463,8 @@ function toggleFilter(ticker) {
 
   // Change symbol input for the selected ticker
   if (ticker !== 'ALL') {
-    document.getElementById('sym').value = ticker;
-    load();  // reload chart for this ticker
+    document.getElementById('sym').value = ticker.toUpperCase();
+    load();
   } else {
     applyFilter();
   }
@@ -491,7 +500,7 @@ async function load(){
   if(skField) sessionStorage.setItem("sk",skField);
   const ak=akField||sessionStorage.getItem("ak")||"";
   const sk=skField||sessionStorage.getItem("sk")||"";
-  const sym=document.getElementById("sym").value.trim()||"MSTR";
+  const sym=(document.getElementById("sym").value.trim()||"MSTR").toUpperCase();
   const dt=document.getElementById("dt").value;
   if(!ak||!sk){alert("Please enter your Alpaca paper trading API Key ID and Secret Key.");return;}
   if(!dt){alert("Please pick a date.");return;}
@@ -566,7 +575,7 @@ async function load(){
     toggleFilter('ALL');
     // Show active ticker badge
     const badge=document.getElementById('activeTicker');
-    if(badge){badge.textContent=sym;badge.style.display='block';}
+    if(badge){badge.textContent=sym.toUpperCase();badge.style.display='block';}
     buildStats({portfolio:parseFloat(aj.portfolio_value)||0,cash:parseFloat(aj.cash)||0},{pnl,buys,sells,count:TRADES.length},dt);
   }catch(err){
     alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
