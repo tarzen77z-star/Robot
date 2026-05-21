@@ -285,83 +285,71 @@ function buildTable(){
   const openVal = buyQueue.reduce((s,b)=>s+b.price*b.qty, 0);
   const openQty = buyQueue.reduce((s,b)=>s+b.qty, 0);
 
-  // Build matched trade rows
+  // Build compact single-line matched trade rows
   const matchedRows = matched.map((r,i)=>{
     const pnlCol = r.pnl>=0 ? "#22c55e" : "#ef4444";
     const pnlStr = (r.pnl>=0?"+":"") + "$" + Math.abs(r.pnl).toFixed(2);
     const pct    = r.buyPx>0 ? ((r.sellPx-r.buyPx)/r.buyPx*100) : 0;
     const pctStr = (pct>=0?"+":"") + pct.toFixed(1) + "%";
-    const label  = r.layer ? `<span class="pill" style="background:#1a254088;color:#6b90b0">${r.layer}</span> ` : "";
-    return `
-      <tr style="border-bottom:1px solid #1a254033">
-        <td style="color:#3d5470;font-family:monospace;font-size:10px">${r.buyTime}<br>${r.sellTime}</td>
-        <td>${label}<span style="color:#3d5470;font-size:10px">${r.note?r.note.slice(0,12):""}</span></td>
-        <td style="font-family:monospace">
-          <span style="color:#22c55e;font-size:11px">BUY</span><br>
-          <span style="color:#dce8f5;font-weight:700">$${r.buyPx.toFixed(2)}</span>
-        </td>
-        <td style="font-family:monospace">
-          <span style="color:#ef4444;font-size:11px">SELL</span><br>
-          <span style="color:#dce8f5;font-weight:700">$${r.sellPx.toFixed(2)}</span>
-        </td>
-        <td style="font-family:monospace;text-align:center">
-          <span style="color:#3d5470">${r.qty}sh</span>
-        </td>
-        <td style="font-family:monospace;text-align:right">
-          <span style="color:${pnlCol};font-weight:700;font-size:13px">${pnlStr}</span><br>
-          <span style="color:${pnlCol};font-size:10px">${pctStr}</span>
-        </td>
-      </tr>`;
-  }).join("");
-
-  // Open positions rows
-  const openRows = buyQueue.length>0 ? buyQueue.map(b=>`
-    <tr style="border-bottom:1px solid #1a254022;opacity:0.6">
-      <td style="color:#3d5470;font-family:monospace;font-size:10px">${b.time}<br><span style="color:#fbbf24">OPEN</span></td>
-      <td><span style="color:#3d5470;font-size:10px">${b.note?b.note.slice(0,12):""}</span></td>
-      <td style="font-family:monospace">
-        <span style="color:#22c55e;font-size:11px">BUY</span><br>
-        <span style="color:#dce8f5;font-weight:700">$${b.price.toFixed(2)}</span>
-      </td>
-      <td style="color:#3d5470;font-size:11px">not sold yet</td>
-      <td style="color:#3d5470;text-align:center">${b.qty}sh</td>
-      <td style="color:#fbbf24;font-family:monospace;text-align:right">OPEN</td>
-    </tr>`).join("") : "";
-
-  // Summary row
-  const summaryRow = `
-    <tr style="background:#0a0f1a;border-top:2px solid #1a2540">
-      <td colspan="5" style="padding:10px;font-weight:700;letter-spacing:1px;color:#6b90b0;font-size:11px">
-        TOTAL — ${matched.length} completed trades
-        ${buyQueue.length>0?` + ${buyQueue.length} open`:""}
-      </td>
-      <td style="padding:10px;font-family:monospace;text-align:right">
-        <span style="color:${totalPnl>=0?"#22c55e":"#ef4444"};font-weight:900;font-size:15px">
-          ${totalPnl>=0?"+":""}$${Math.abs(totalPnl).toFixed(2)}
-        </span>
+    const bg     = i%2===0 ? "#0e1420" : "#0b1018";
+    return `<tr style="background:${bg}">
+      <td style="color:#6b90b0;font-family:monospace;font-size:11px;white-space:nowrap">${r.buyTime}→${r.sellTime}</td>
+      <td style="color:#3d5470;font-size:10px;white-space:nowrap">${r.note?r.note.slice(0,10):""}</td>
+      <td style="font-family:monospace;font-size:12px;color:#22c55e;white-space:nowrap">$${r.buyPx.toFixed(2)}</td>
+      <td style="font-family:monospace;font-size:12px;color:#f87171;white-space:nowrap">$${r.sellPx.toFixed(2)}</td>
+      <td style="font-family:monospace;font-size:11px;color:#3d5470;text-align:center">${r.qty}sh</td>
+      <td style="font-family:monospace;text-align:right;white-space:nowrap">
+        <span style="color:${pnlCol};font-weight:700">${pnlStr}</span>
+        <span style="color:${pnlCol};font-size:10px;margin-left:4px">${pctStr}</span>
       </td>
     </tr>`;
+  }).join("");
+
+  // Compact open rows
+  const openRows = buyQueue.length>0 ? buyQueue.map((b,i)=>{
+    const bg = (matched.length+i)%2===0 ? "#0e1420" : "#0b1018";
+    return `<tr style="background:${bg};opacity:0.55">
+      <td style="color:#fbbf24;font-family:monospace;font-size:11px">${b.time} OPEN</td>
+      <td style="color:#3d5470;font-size:10px">${b.note?b.note.slice(0,10):""}</td>
+      <td style="font-family:monospace;font-size:12px;color:#22c55e">$${b.price.toFixed(2)}</td>
+      <td style="color:#3d5470;font-size:11px">—</td>
+      <td style="color:#3d5470;font-size:11px;text-align:center">${b.qty}sh</td>
+      <td style="color:#fbbf24;font-family:monospace;text-align:right;font-size:11px">holding</td>
+    </tr>`;
+  }).join("") : "";
+
+  // Summary row
+  const summaryRow = `<tr style="background:#0a0f1a;border-top:1px solid #1a2540">
+    <td colspan="5" style="padding:6px 8px;color:#3d5470;font-size:11px">
+      ${matched.length} trades${buyQueue.length>0?" + "+buyQueue.length+" open":""}
+    </td>
+    <td style="padding:6px 8px;font-family:monospace;text-align:right">
+      <span style="color:${totalPnl>=0?"#22c55e":"#ef4444"};font-weight:900;font-size:14px">
+        ${totalPnl>=0?"+":""}$${Math.abs(totalPnl).toFixed(2)}
+      </span>
+    </td>
+  </tr>`;
 
   document.getElementById("tbl").innerHTML=`
-    <div style="background:#0e1420;border-radius:10px;padding:16px 18px;border:1px solid #1a2540;margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div style="background:#0e1420;border-radius:10px;padding:12px 14px;border:1px solid #1a2540;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <span style="font-weight:700;font-size:13px;letter-spacing:1px">EXECUTIONS</span>
         <span style="color:${totalPnl>=0?"#22c55e":"#ef4444"};font-weight:700;font-size:14px">
           Realized: ${totalPnl>=0?"+":""}$${Math.abs(totalPnl).toFixed(2)}
         </span>
       </div>
       <div style="overflow-x:auto">
-        <table>
-          <thead><tr style="border-bottom:2px solid #1a2540">
-            <th style="width:80px">Time<br><span style="font-weight:400;color:#3d5470">In / Out</span></th>
-            <th>Layer</th>
-            <th>Entry<br><span style="font-weight:400;color:#3d5470">Buy price</span></th>
-            <th>Exit<br><span style="font-weight:400;color:#3d5470">Sell price</span></th>
-            <th style="text-align:center">Shares</th>
-            <th style="text-align:right">P&L</th>
+        <table style="font-size:12px">
+          <thead><tr style="border-bottom:1px solid #1a2540">
+            <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px">TIME</th>
+            <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px">SYMBOL</th>
+            <th style="padding:4px 8px;color:#22c55e;font-weight:600;font-size:10px;letter-spacing:1px">BUY</th>
+            <th style="padding:4px 8px;color:#f87171;font-weight:600;font-size:10px;letter-spacing:1px">SELL</th>
+            <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px;text-align:center">QTY</th>
+            <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px;text-align:right">P&L</th>
           </tr></thead>
           <tbody>
-            ${matchedRows||"<tr><td colspan='6' style='color:#3d5470;padding:12px 10px'>No completed trades for this date</td></tr>"}
+            ${matchedRows||"<tr><td colspan='6' style='color:#3d5470;padding:10px 8px;font-size:11px'>No completed trades</td></tr>"}
             ${openRows}
             ${matched.length>0||buyQueue.length>0 ? summaryRow : ""}
           </tbody>
