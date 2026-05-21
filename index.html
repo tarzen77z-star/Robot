@@ -59,10 +59,14 @@ td{padding:6px 10px}
   <span style="color:#22d3ee;font-size:16px;font-weight:900">─</span><span style="color:#22d3ee;font-weight:700">MA20</span>
   <span style="color:#fbbf24;font-size:16px;font-weight:900">─</span><span style="color:#fbbf24;font-weight:700">MA50</span>
   <span style="color:#c084fc;font-size:16px;font-weight:900">─</span><span style="color:#c084fc;font-weight:700">MA200</span>
-  <span style="color:#22c55e;font-size:14px">▲</span><span style="color:#22c55e;font-weight:700">Buy (LONG)</span>
-  <span style="color:#f87171;font-size:14px">▼</span><span style="color:#f87171;font-weight:700">Sell (EXIT)</span>
-  <span style="color:#f97316;font-size:14px">▽</span><span style="color:#f97316;font-weight:700">Short (SHORT)</span>
-  <span style="color:#38bdf8;font-size:14px">△</span><span style="color:#38bdf8;font-weight:700">Cover (COVER)</span>
+  <span style="color:#22c55e;font-size:14px">▲</span><span style="color:#22c55e;font-weight:700">Buy</span>
+  <span style="color:#f87171;font-size:14px">▼</span><span style="color:#f87171;font-weight:700">Sell</span>
+  <span style="color:#f97316;font-size:14px">▽</span><span style="color:#f97316;font-weight:700">Short</span>
+  <span style="color:#38bdf8;font-size:14px">△</span><span style="color:#38bdf8;font-weight:700">Cover</span>
+  <span style="color:#a78bfa;font-size:14px">C▲</span><span style="color:#a78bfa;font-weight:700">Buy Call</span>
+  <span style="color:#c084fc;font-size:14px">C▼</span><span style="color:#c084fc;font-weight:700">Sell Call</span>
+  <span style="color:#fb923c;font-size:14px">P▼</span><span style="color:#fb923c;font-weight:700">Buy Put</span>
+  <span style="color:#f97316;font-size:14px">P▲</span><span style="color:#f97316;font-weight:700">Sell Put</span>
   <span style="color:#fde68a;font-size:14px">★</span><span style="color:#fde68a;font-weight:700">Better entry</span>
   <span style="color:#3d5470;font-size:10px">— hover markers for details</span>
 </div>
@@ -83,9 +87,15 @@ td{padding:6px 10px}
 <div id="tip"></div>
 
 <script>
-const MC={BUY:"#22c55e",SELL:"#f87171",SHORT:"#f97316",COVER:"#38bdf8"};
-const MS={BUY:"▲",SELL:"▼",SHORT:"▽",COVER:"△"};
-const MU={BUY:true,SELL:false,SHORT:false,COVER:true};
+const MC={BUY:"#22c55e",SELL:"#f87171",SHORT:"#f97316",COVER:"#38bdf8",
+          "BUY CALL":"#a78bfa",  "SELL CALL":"#c084fc",
+          "BUY PUT":"#fb923c",   "SELL PUT":"#f97316"};
+const MS={BUY:"▲",SELL:"▼",SHORT:"▽",COVER:"△",
+          "BUY CALL":"C",  "SELL CALL":"C",
+          "BUY PUT":"P",   "SELL PUT":"P"};
+const MU={BUY:true,SELL:false,SHORT:false,COVER:true,
+          "BUY CALL":true, "SELL CALL":false,
+          "BUY PUT":false, "SELL PUT":true};
 
 function sma(d,p){return d.map((b,i)=>{if(i<p-1)return{...b,[`ma${p}`]:null};const a=d.slice(i-p+1,i+1).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ma${p}`]:+a.toFixed(2)};});}
 function rsi(d,p=14){const c=d.map(x=>x.close);return d.map((b,i)=>{if(i<p)return{...b,rsi:null};let g=0,l=0;for(let j=i-p+1;j<=i;j++){const df=c[j]-c[j-1];df>0?g+=df:l-=df;}const rs=l===0?100:g/l;return{...b,rsi:+(100-100/(1+rs)).toFixed(2)};});}
@@ -504,18 +514,23 @@ async function load(){
     const lastEq = parseFloat(aj.last_equity || equity);
     const pnl    = equity - lastEq;
     let buys=0,sells=0;
-    // Filter orders to only the loaded symbol (orders API returns ALL tickers)
+    // Filter orders to only the loaded symbol
     const filteredOrders=(Array.isArray(oj)?oj:[]).filter(o=>{
       const orderSym=(o.symbol||"").toUpperCase();
-      // Match exact symbol OR option contracts (e.g. TSLA260529C...)
       return orderSym===sym.toUpperCase() || orderSym.startsWith(sym.toUpperCase());
     });
     TRADES=filteredOrders.map(o=>{
       const t=new Date(o.filled_at||o.submitted_at);
       const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
       const isOption=o.symbol.length>5;
-      let type=o.side==="buy"?"BUY":"SELL";
-      if(isOption) type=o.side==="buy"?"BUY":"SELL";
+      let type;
+      if(isOption){
+        // Detect call vs put from contract symbol (e.g. NFLX260529C00090000)
+        const isCall=/\d{6}C\d/.test(o.symbol);
+        type = o.side==="buy" ? (isCall?"BUY CALL":"BUY PUT") : (isCall?"SELL CALL":"SELL PUT");
+      } else {
+        type = o.side==="buy"?"BUY":"SELL";
+      }
       if(o.side==="buy"){buys++;}else{sells++;}
       return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
     });
