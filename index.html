@@ -29,7 +29,7 @@ td{padding:6px 10px}
     <div style="font-size:22px;font-weight:900;letter-spacing:3px;color:#fff">POST-MORTEM ANALYSIS</div>
     <div id="activeTicker" style="font-size:18px;font-weight:900;letter-spacing:2px;color:#fbbf24;background:#fbbf2415;padding:2px 12px;border-radius:6px;border:1px solid #fbbf2433;display:none"></div>
   </div>
-    <div style="font-size:10px;color:#7ca0c0;margin-top:4px;letter-spacing:2px">1-MIN CANDLESTICK · MA20 / MA50 / MA200 / EMA50 · BB(20,2) · RSI · MACD</div>
+    <div style="font-size:10px;color:#7ca0c0;margin-top:4px;letter-spacing:2px">1-MIN CANDLESTICK · MA20 / MA50 / MA200 / EMA50 · RSI · MACD</div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="sym" class="inp" value="MSTR" style="width:72px"/>
@@ -60,7 +60,7 @@ td{padding:6px 10px}
   <span style="color:#fbbf24;font-size:16px;font-weight:900">─</span><span style="color:#fbbf24;font-weight:700">MA50</span>
   <span style="color:#c084fc;font-size:16px;font-weight:900">─</span><span style="color:#c084fc;font-weight:700">MA200</span>
   <span style="color:#34d399;font-size:16px;font-weight:900">─</span><span style="color:#34d399;font-weight:700">EMA50</span>
-  <span style="color:#a78bfa;font-size:14px">⋯</span><span style="color:#a78bfa;font-weight:700">BB(20,2)</span>
+
   <span style="color:#22c55e;font-size:14px">▲</span><span style="color:#22c55e;font-weight:700">Buy</span>
   <span style="color:#f87171;font-size:14px">▼</span><span style="color:#f87171;font-weight:700">Sell</span>
   <span style="color:#f97316;font-size:14px">▽</span><span style="color:#f97316;font-weight:700">Short</span>
@@ -104,7 +104,7 @@ function rsi(d,p=14){const c=d.map(x=>x.close);return d.map((b,i)=>{if(i<p)retur
 function macd(d){const c=d.map(x=>x.close);const ema=(a,p)=>{const k=2/(p+1),r=[a[0]];for(let i=1;i<a.length;i++)r.push(a[i]*k+r[i-1]*(1-k));return r;};const ml=ema(c,12).map((v,i)=>v-ema(c,26)[i]);const sig=ema(ml.slice(26),9);return d.map((b,i)=>({...b,macd:i>=26?+(ml[i]).toFixed(3):null,signal:i>=34?+(sig[i-26]).toFixed(3):null,hist:i>=34?+(ml[i]-sig[i-26]).toFixed(3):null}));}
 function ema(d,p){const k=2/(p+1);return d.map((b,i)=>{if(i===0)return{...b,[`ema${p}`]:+b.close.toFixed(2)};const prev=d[i-1][`ema${p}`]??b.close;return{...b,[`ema${p}`]:+(b.close*k+prev*(1-k)).toFixed(2)};});}
 function bbands(d,p=20,mult=2){return d.map((b,i)=>{if(i<p-1)return{...b,bb_upper:null,bb_mid:null,bb_lower:null};const sl=d.slice(i-p+1,i+1);const mid=sl.reduce((s,x)=>s+x.close,0)/p;const std=Math.sqrt(sl.reduce((s,x)=>s+(x.close-mid)**2,0)/p);return{...b,bb_upper:+(mid+mult*std).toFixed(2),bb_mid:+(mid).toFixed(2),bb_lower:+(mid-mult*std).toFixed(2)};});}
-function enrich(b){let d=sma(b,20);d=sma(d,50);d=sma(d,200);d=ema(d,50);d=bbands(d);d=rsi(d);return macd(d);}
+function enrich(b){let d=sma(b,20);d=sma(d,50);d=sma(d,200);d=ema(d,50);d=rsi(d);return macd(d);}
 
 function betterEntries(bars,trades){
   const out=[];
@@ -154,20 +154,6 @@ function drawCandles(){
   for(let i=0;i<6;i++){const v=lo+(rng*i/5),y=gy(v);ctx.strokeStyle="#1a2540";ctx.lineWidth=0.5;ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(PL+W,y);ctx.stroke();ctx.fillStyle="#6b90b0";ctx.font="10px monospace";ctx.textAlign="right";ctx.fillText("$"+v.toFixed(0),PL-4,y+4);}
   ctx.setLineDash([]);
   BARS.forEach((b,i)=>{if(i%30!==0)return;ctx.fillStyle="#6b90b0";ctx.font="9px monospace";ctx.textAlign="center";ctx.fillText(b.time,gx(i),PT+H+14);});
-  // Bollinger Bands — fill first, then dashed lines
-  const bbU=[],bbL=[];
-  BARS.forEach((b,i)=>{if(b.bb_upper)bbU.push([i,b.bb_upper]);if(b.bb_lower)bbL.push([i,b.bb_lower]);});
-  if(bbU.length>1){
-    ctx.beginPath();
-    bbU.forEach(([i,v],j)=>j===0?ctx.moveTo(gx(i),gy(v)):ctx.lineTo(gx(i),gy(v)));
-    [...bbL].reverse().forEach(([i,v])=>ctx.lineTo(gx(i),gy(v)));
-    ctx.closePath();ctx.fillStyle='#a78bfa12';ctx.fill();
-    ['bb_upper','bb_lower'].forEach(k=>{
-      ctx.beginPath();let f=true;
-      BARS.forEach((b,i)=>{if(!b[k])return;f?(ctx.moveTo(gx(i),gy(b[k])),f=false):ctx.lineTo(gx(i),gy(b[k]));});
-      ctx.strokeStyle='#a78bfa55';ctx.lineWidth=0.8;ctx.setLineDash([4,4]);ctx.stroke();ctx.setLineDash([]);
-    });
-  }
   // MA lines + EMA50
   [["ma20","#22d3ee"],["ma50","#fbbf24"],["ma200","#c084fc"],["ema50","#34d399"]].forEach(([k,col])=>{ctx.strokeStyle=col;ctx.lineWidth=k==="ema50"?1:1.3;ctx.beginPath();let f=true;BARS.forEach((b,i)=>{if(b[k]==null)return;f?(ctx.moveTo(gx(i),gy(b[k])),f=false):ctx.lineTo(gx(i),gy(b[k]));});ctx.stroke();});
   BARS.forEach((b,i)=>{const x=gx(i),up=b.close>=b.open,col=up?"#22c55e":"#ef4444";ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,gy(b.high));ctx.lineTo(x,gy(b.low));ctx.stroke();ctx.fillStyle=col;ctx.globalAlpha=.85;ctx.fillRect(x-bw/2,gy(Math.max(b.open,b.close)),bw,Math.max(1,gy(Math.min(b.open,b.close))-gy(Math.max(b.open,b.close))));ctx.globalAlpha=1;});
