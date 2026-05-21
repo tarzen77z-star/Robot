@@ -500,8 +500,12 @@ async function load(){
   try{
     const h={"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
     const s=encodeURIComponent(dt+"T06:00:00-04:00"),e=encodeURIComponent(dt+"T16:00:00-04:00");
+    // Fetch 5 days of bars so EMA50/MA200 are pre-warmed (not just today)
+    const dtObj=new Date(dt+"T12:00:00Z");
+    const dtMinus5=new Date(dtObj);dtMinus5.setDate(dtMinus5.getDate()-7);
+    const s5=encodeURIComponent(dtMinus5.toISOString().slice(0,10)+"T06:00:00-04:00");
     const [bR,aR,oR]=await Promise.all([
-      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=800`,{headers:h}),
+      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s5}&end=${e}&limit=4000`,{headers:h}),
       fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
       fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=200`,{headers:h})
     ]);
@@ -515,13 +519,14 @@ async function load(){
       const et=new Date(utc.toLocaleString("en-US",{timeZone:"America/New_York"}));
       const hh=et.getHours().toString().padStart(2,"0");
       const mm=et.getMinutes().toString().padStart(2,"0");
-      return{time:`${hh}:${mm}`,open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v};
+      const dateStr=utc.toLocaleDateString("en-CA",{timeZone:"America/New_York"});
+      return{time:`${hh}:${mm}`,date:dateStr,open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v};
     }));
-    // Display only market hours 9:30am-4:00pm — MAs already calculated
+    // Filter to selected date + market hours only (MAs pre-warmed from 7 days)
     BARS=allBars.filter(b=>{
       const [hh,mm]=b.time.split(":").map(Number);
       const mins=hh*60+mm;
-      return mins>=570&&mins<=960; // 9:30am to 4:00pm
+      return b.date===dt && mins>=570&&mins<=960;
     });
     // True day P&L = portfolio value change since yesterday close
     const equity = parseFloat(aj.equity || aj.portfolio_value || 0);
