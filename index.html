@@ -89,7 +89,7 @@ td{padding:6px 10px}
 <div class="panel" style="overflow:hidden">
   <div class="plabel">PRICE — 1 MIN CANDLES <span style="color:#3d5470;font-size:9px;font-weight:400">scroll=zoom · drag=pan · dblclick=reset</span></div>
   <div id="wrap" style="overflow-x:auto;overflow-y:visible;position:relative">
-    <canvas id="cv" height="300" style="cursor:crosshair;display:block;width:100%"></canvas>
+    <canvas id="cv" height="360" style="cursor:crosshair;display:block;width:100%"></canvas>
   </div>
 </div>
 <div class="panel"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
@@ -168,7 +168,7 @@ function py(v,hi,lo){return 40+(260-((v-lo)/(hi-lo))*260);}
 function drawCandles(){
   const wrap=document.getElementById("wrap");
   CVW=wrap.clientWidth||900;  // always fit window — no horizontal scroll
-  const cv=document.getElementById("cv");cv.width=CVW;cv.height=300;
+  const cv=document.getElementById("cv");cv.width=CVW;cv.height=360;
   const ctx=cv.getContext("2d");
   const PL=58,PR=10,PT=40,W=CVW-PL-PR,H=260;
   const hi=Math.max(...BARS.map(d=>d.high))*1.001,lo=Math.min(...BARS.map(d=>d.low))*.999,rng=hi-lo;
@@ -489,63 +489,70 @@ window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
 
 // ── Chart interactions: zoom + pan ──────────────────────────────────────────
 (function(){
-  const el = ()=>document.getElementById("cv");
   let drag={on:false,x0:0,s0:0,e0:0};
-  let ydrag={on:false,y0:0,lo0:0,hi0:0};
+  const getCV=()=>document.getElementById("cv");
 
   // Scroll wheel → zoom X
-  el().addEventListener("wheel",e=>{
-    e.preventDefault();
+  getCV().addEventListener("wheel",function(e){
+    e.preventDefault();e.stopPropagation();
     if(!BARS.length)return;
-    const rect=el().getBoundingClientRect();
-    const mx=(e.clientX-rect.left)/rect.width;
+    const rect=this.getBoundingClientRect();
+    const mx=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
     const span=VIEW.end-VIEW.start;
-    const factor=e.deltaY>0?1.3:0.77;
-    const newSpan=Math.min(1,Math.max(0.03,span*factor));
-    const pivot=VIEW.start+span*mx;
-    let ns=pivot-newSpan*mx;
+    const factor=e.deltaY>0?1.25:0.8;
+    const newSpan=Math.min(1,Math.max(0.05,span*factor));
+    let ns=(VIEW.start+span*mx)-newSpan*mx;
+    if(ns<0)ns=0;
     let ne=ns+newSpan;
-    if(ns<0){ns=0;ne=newSpan;}
-    if(ne>1){ne=1;ns=1-newSpan;}
+    if(ne>1){ne=1;ns=Math.max(0,ne-newSpan);}
     VIEW.start=ns;VIEW.end=ne;VIEW.ylo=null;VIEW.yhi=null;
     renderAll();
   },{passive:false});
 
-  // Left click drag → pan X
-  el().addEventListener("mousedown",e=>{
-    if(e.button===0){
-      e.preventDefault();
-      drag={on:true,x0:e.clientX,s0:VIEW.start,e0:VIEW.end};
-      el().style.cursor="grabbing";
-    }
+  // Mousedown → start pan
+  getCV().addEventListener("mousedown",function(e){
+    if(e.button!==0)return;
+    e.preventDefault();e.stopPropagation();
+    drag={on:true,x0:e.clientX,s0:VIEW.start,e0:VIEW.end};
+    this.style.cursor="grabbing";
   });
 
-  // Double click → reset
-  el().addEventListener("dblclick",()=>{
-    VIEW={start:0,end:1,ylo:null,yhi:null};
+  // Mousemove on canvas → pan (use canvas-bound not window)
+  getCV().addEventListener("mousemove",function(e){
+    if(!drag.on||!BARS.length)return;
+    const W=this.getBoundingClientRect().width||900;
+    const span=drag.e0-drag.s0;
+    const dx=(drag.x0-e.clientX)/W*span;
+    const ns=Math.max(0,Math.min(1-span,drag.s0+dx));
+    VIEW.start=ns;VIEW.end=ns+span;VIEW.ylo=null;VIEW.yhi=null;
     renderAll();
   });
 
-  // Context menu suppress
-  el().addEventListener("contextmenu",e=>e.preventDefault());
+  // Also handle on window so drag works if mouse leaves canvas
+  window.addEventListener("mousemove",function(e){
+    if(!drag.on||!BARS.length)return;
+    const cv=getCV();if(!cv)return;
+    const W=cv.getBoundingClientRect().width||900;
+    const span=drag.e0-drag.s0;
+    const dx=(drag.x0-e.clientX)/W*span;
+    const ns=Math.max(0,Math.min(1-span,drag.s0+dx));
+    VIEW.start=ns;VIEW.end=ns+span;VIEW.ylo=null;VIEW.yhi=null;
+    renderAll();
+  });
 
-  // Global mouse move and up
-  window.addEventListener("mousemove",e=>{
-    if(drag.on&&BARS.length){
-      const W=el().getBoundingClientRect().width||CVW||900;
-      const span=drag.e0-drag.s0;
-      // px moved / canvas width * current view span = fraction to shift
-      const dx=(drag.x0-e.clientX)/W*span;
-      let ns=Math.max(0,Math.min(1-span,drag.s0+dx));
-      VIEW.start=ns;VIEW.end=ns+span;VIEW.ylo=null;VIEW.yhi=null;
-      renderAll();
-    }
+  window.addEventListener("mouseup",function(){
+    if(!drag.on)return;
+    drag.on=false;
+    const cv=getCV();if(cv)cv.style.cursor="crosshair";
   });
-  window.addEventListener("mouseup",e=>{
-    if(drag.on){drag.on=false;el().style.cursor="crosshair";}
+
+  // Double click → reset
+  getCV().addEventListener("dblclick",function(){
+    VIEW={start:0,end:1,ylo:null,yhi:null};renderAll();
   });
+
+  getCV().addEventListener("contextmenu",e=>e.preventDefault());
 })();
-
 let ACTIVE_FILTER = 'ALL';
 let ALL_TRADES = [];
 let ALL_BETTER = [];
@@ -674,7 +681,7 @@ async function load(){
     ALL_BETTER=[...BETTER];
     // Auto-detect tickers and show relevant filter buttons
     const tickers = new Set(ALL_TRADES.map(t=>(t.note||'').split(/[0-9]/)[0].toUpperCase()).filter(t=>t.length>=2&&t.length<=5));
-    ['MSTR','TSLA','NFLX','META'].forEach(t=>{
+    ['MSTR','TSLA','NFLX','META','GOOGL','AMD'].forEach(t=>{
       const btn=document.getElementById('f-'+t);
       if(btn) btn.style.display = tickers.has(t) ? 'block' : 'none';
     });
@@ -754,6 +761,20 @@ const STRAT_INFO = {
       "RSI rises to ≥70 (flat) → SHORT 50 shares",
       "RSI drops to ≤25 (short) → COVER short + BUY long immediately",
       "Will not rebuy if already holding position",
+    ],
+    levelsKey: null
+  },
+  AMD: {
+    name: "AMD — MACD + RSI + MA Combo",
+    signal: "MACD cross arms trigger → RSI < 40 + MA50/MA200 above price confirms BUY",
+    window: "9:30am – 3:55pm ET  |  50 shares",
+    rules: [
+      "Step 1 (Trigger): EMA12 crosses above EMA26 while MACD < 0 → ARMED BUY",
+      "Step 2 (Confirm): RSI < 40 AND MA50 & MA200 both above price → BUY LONG",
+      "Sell trigger: EMA12 crosses below EMA26 while MACD > 0 → ARMED SELL",
+      "Sell confirm: RSI > 60 AND price above MA50 & MA200 → SELL + SHORT",
+      "Cover trigger: same BUY conditions met → COVER short + BUY LONG",
+      "Cycle repeats: Long → Short → Long →...",
     ],
     levelsKey: null
   }
