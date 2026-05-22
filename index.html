@@ -519,22 +519,15 @@ async function load(){
   try{
     const h={"APCA-API-KEY-ID":ak,"APCA-API-SECRET-KEY":sk};
     const s=encodeURIComponent(dt+"T06:00:00-04:00"),e=encodeURIComponent(dt+"T16:00:00-04:00");
-    // Fetch 5 days of bars so EMA50/MA200 are pre-warmed (not just today)
-    const dtObj=new Date(dt+"T12:00:00Z");
-    const dtMinus5=new Date(dtObj);dtMinus5.setDate(dtMinus5.getDate()-7);
-    const s5=encodeURIComponent(dtMinus5.toISOString().slice(0,10)+"T06:00:00-04:00");
     const [bR,aR,oR]=await Promise.all([
-      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s5}&end=${e}&limit=4000`,{headers:h}),
+      fetch(`https://data.alpaca.markets/v2/stocks/${sym}/bars?timeframe=1Min&start=${s}&end=${e}&limit=1000`,{headers:h}),
       fetch("https://paper-api.alpaca.markets/v2/account",{headers:h}),
       fetch(`https://paper-api.alpaca.markets/v2/orders?status=filled&after=${s}&until=${e}&limit=200`,{headers:h})
     ]);
     const bj=await bR.json(),aj=await aR.json(),oj=await oR.json();
     if(bj.code||bj.message?.toLowerCase().includes("unauthorized")){alert("API keys rejected. Check your Alpaca paper trading Key ID and Secret Key.");btn.disabled=false;btn.textContent="LOAD";return;}
-    // Alpaca returns {bars: [...]} or {bars: {SYMBOL: [...]}}
-    let rawBars = bj.bars;
-    if(!Array.isArray(rawBars)) rawBars = bj.bars?.[sym] || bj.bars?.[sym.toUpperCase()] || [];
-    if(!rawBars?.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
-    // Enrich ALL bars (including pre-market) so MAs are warmed up
+    const rawBars = Array.isArray(bj.bars) ? bj.bars : (bj.bars?.[sym] || bj.bars?.[sym.toUpperCase()] || []);
+    if(!rawBars.length){alert(`No data for ${sym} on ${dt}.\nMarket may have been closed (weekend/holiday).`);btn.disabled=false;btn.textContent="LOAD";return;}
     const allBars=enrich(rawBars.map(b=>{
       // Convert UTC timestamp to ET (Eastern Time)
       const utc=new Date(b.t);
@@ -544,11 +537,11 @@ async function load(){
       const dateStr=utc.toLocaleDateString("en-CA",{timeZone:"America/New_York"});
       return{time:`${hh}:${mm}`,date:dateStr,open:b.o,close:b.c,high:b.h,low:b.l,volume:b.v};
     }));
-    // Filter to selected date + market hours only (MAs pre-warmed from 7 days)
+    // Filter to market hours 9:30am-4:00pm
     BARS=allBars.filter(b=>{
       const [hh,mm]=b.time.split(":").map(Number);
       const mins=hh*60+mm;
-      return b.date===dt && mins>=570&&mins<=960;
+      return mins>=570&&mins<=960;
     });
     // True day P&L = portfolio value change since yesterday close
     const equity = parseFloat(aj.equity || aj.portfolio_value || 0);
