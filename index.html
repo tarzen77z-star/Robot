@@ -223,7 +223,7 @@ function drawCandles(){
   const gs=(x,y0,up)=>{const bk=Math.round(x/8);if(!slots[bk])slots[bk]=[];let y=y0,a=0;while(a<10){if(!slots[bk].some(u=>Math.abs(u-y)<SL))break;y+=up?-SL:SL;a++;}slots[bk].push(y);return y;};
   cv._mk=[];
 
-  const TYPE_LBL={BUY:"LONG",SELL:"EXIT",SHORT:"SHORT",COVER:"COVER"};
+  const TYPE_LBL={BUY:"LONG",SELL:"EXIT",SHORT:"SHORT",COVER:"COVER","BUY CALL":"BUY C","SELL CALL":"SELL C","BUY PUT":"BUY P","SELL PUT":"SELL P"};
 
   TRADES.forEach(t=>{
     const idx=BARS.findIndex(b=>b.time===t.time);if(idx<0)return;
@@ -334,12 +334,15 @@ function buildTable(){
         const qty = Math.min(remaining, buy.qty);
         // For options: profit = (exit premium - entry premium) * qty * 100
         // For shares:  profit = (exit price - entry price) * qty
+        // For shorts:  profit = (short entry - cover price) * qty (sell HIGH cover LOW)
         const isOption = (sym.length > 6);
         const multiplier = isOption ? 100 : 1;
-        const isShort = sell.type==="SHORT";
-        const pnl = isShort
-          ? (buy.price - sell.price) * qty * multiplier
-          : (sell.price - buy.price) * qty * multiplier;
+        // SHORT: sell.type is SHORT (entry), buy.type is COVER (exit)
+        // P&L = short_price - cover_price (profit when price drops)
+        const isShortTrade = sell.type==="SHORT";
+        const pnl = isShortTrade
+          ? (sell.price - buy.price) * qty * multiplier   // SHORT entry - COVER exit
+          : (sell.price - buy.price) * qty * multiplier;  // same formula works for longs too
         matched.push({
           buyTime:  buy.time,
           sellTime: sell.time,
@@ -382,8 +385,14 @@ function buildTable(){
     return `<tr style="background:${bg}">
       <td style="color:#6b90b0;font-family:monospace;font-size:11px;white-space:nowrap">${r.buyTime}→${r.sellTime}</td>
       <td style="color:#3d5470;font-size:10px;white-space:nowrap">${r.note?r.note.slice(0,10):""}</td>
-      <td style="font-family:monospace;font-size:12px;color:#22c55e;white-space:nowrap">$${r.buyPx.toFixed(2)}</td>
-      <td style="font-family:monospace;font-size:12px;color:#f87171;white-space:nowrap">$${r.sellPx.toFixed(2)}</td>
+      <td style="font-family:monospace;font-size:12px;white-space:nowrap">
+        <span style="color:#3d5470;font-size:9px">${r.buyType||"BUY"}</span><br>
+        <span style="color:#22c55e">$${r.buyPx.toFixed(2)}</span>
+      </td>
+      <td style="font-family:monospace;font-size:12px;white-space:nowrap">
+        <span style="color:#3d5470;font-size:9px">${r.sellType||"SELL"}</span><br>
+        <span style="color:#f87171">$${r.sellPx.toFixed(2)}</span>
+      </td>
       <td style="font-family:monospace;font-size:11px;color:#3d5470;text-align:center">${r.isOption?r.qty+"c":r.qty+"sh"}</td>
       <td style="font-family:monospace;text-align:right;white-space:nowrap">
         <span style="color:${pnlCol};font-weight:700">${pnlStr}</span>
@@ -451,8 +460,8 @@ function buildTable(){
           <thead><tr style="border-bottom:1px solid #1a2540">
             <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px">TIME</th>
             <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px">SYMBOL</th>
-            <th style="padding:4px 8px;color:#22c55e;font-weight:600;font-size:10px;letter-spacing:1px">BUY</th>
-            <th style="padding:4px 8px;color:#f87171;font-weight:600;font-size:10px;letter-spacing:1px">SELL</th>
+            <th style="padding:4px 8px;color:#22c55e;font-weight:600;font-size:10px;letter-spacing:1px">ENTRY</th>
+            <th style="padding:4px 8px;color:#f87171;font-weight:600;font-size:10px;letter-spacing:1px">EXIT</th>
             <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px;text-align:center">QTY</th>
             <th style="padding:4px 8px;color:#3d5470;font-weight:600;font-size:10px;letter-spacing:1px;text-align:right">P&L</th>
           </tr></thead>
@@ -683,31 +692,53 @@ async function load(){
       const orderSym=(o.symbol||"").toUpperCase();
       return orderSym===sym.toUpperCase() || orderSym.startsWith(sym.toUpperCase());
     });
-    // Track running position to distinguish BUY vs COVER and SELL vs SHORT
+    // Sort by exact filled time, then track running position
+    const sortedOrders = [...filteredOrders].sort((a,b)=>{
+      const ta=new Date(a.filled_at||a.submitted_at).getTime();
+      const tb=new Date(b.filled_at||b.submitted_at).getTime();
+      return ta-tb;
+    });
+
+    // Calculate net qty from ALL orders to determine correct trade types
+    // First pass: compute cumulative qty at each point
     let runningQty = 0;
-    TRADES=filteredOrders.map(o=>{
+    const withQty = sortedOrders.map(o=>{
+      const qty = parseFloat(o.filled_qty||0);
+      const qtyBefore = runningQty;
+      if(o.side==="buy")  runningQty += qty;
+      else                runningQty -= qty;
+      return {...o, _qty:qty, _qtyBefore:qtyBefore, _qtyAfter:runningQty};
+    });
+
+    // Second pass: assign correct type based on position before the order
+    runningQty = 0;
+    const mappedTrades = withQty.map(o=>{
       const t=new Date(o.filled_at||o.submitted_at);
       const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
+      const ss=t.getSeconds().toString().padStart(2,"0");
       const isOption=o.symbol.length>5;
-      const qty=parseFloat(o.filled_qty||0);
+      const qty=o._qty;
       let type;
       if(isOption){
         const isCall=/\d{6}C\d/.test(o.symbol);
         type = o.side==="buy" ? (isCall?"BUY CALL":"BUY PUT") : (isCall?"SELL CALL":"SELL PUT");
       } else {
+        const before = runningQty;
         if(o.side==="buy"){
-          // If we're short (negative qty), this is a COVER; if flat/long, it's a BUY
-          type = runningQty < 0 ? "COVER" : "BUY";
+          // Coming from short (negative) → COVER, else BUY
+          type = before < 0 ? "COVER" : "BUY";
           runningQty += qty;
         } else {
-          // If we're long (positive qty), this is a SELL; if flat/short, it's a SHORT
-          type = runningQty > 0 ? "SELL" : "SHORT";
+          // Coming from long (positive) → SELL, else SHORT
+          type = before > 0 ? "SELL" : "SHORT";
           runningQty -= qty;
         }
       }
       if(o.side==="buy"){buys++;}else{sells++;}
-      return{type,layer:"",qty,price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
+      return{type,layer:"",qty,price:parseFloat(o.filled_avg_price||0),
+             time:`${hh}:${mm}`,timeFull:`${hh}:${mm}:${ss}`,note:o.symbol};
     });
+    TRADES=mappedTrades;
     BETTER=betterEntries(BARS,TRADES);
     ALL_TRADES=[...TRADES];
     ALL_BETTER=[...BETTER];
