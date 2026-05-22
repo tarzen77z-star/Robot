@@ -392,7 +392,7 @@ function buildTable(){
     </tr>`;
   }).join("");
 
-  // Compact open rows
+  // Compact open rows (unmatched buys)
   const openRows = buyQueue.length>0 ? buyQueue.map((b,i)=>{
     const bg = (matched.length+i)%2===0 ? "#0e1420" : "#0b1018";
     return `<tr style="background:${bg};opacity:0.55">
@@ -404,6 +404,27 @@ function buildTable(){
       <td style="color:#fbbf24;font-family:monospace;text-align:right;font-size:11px">holding</td>
     </tr>`;
   }).join("") : "";
+
+  // Carry-over sells: sells with no matching buy today (position from prev day)
+  const carryRows = (() => {
+    const rows = [];
+    TRADES.filter(t=>t.type==="SELL"||t.type==="SELL CALL"||t.type==="SELL PUT"||t.type==="SHORT").forEach(sell=>{
+      const wasMatched = matched.some(m=>m.sellTime===sell.time && m.sellPx===sell.price);
+      if(!wasMatched){
+        const i=rows.length;
+        const bg=(matched.length+buyQueue.length+i)%2===0?"#0e1420":"#0b1018";
+        rows.push(`<tr style="background:${bg};opacity:0.65">
+          <td style="color:#f97316;font-family:monospace;font-size:11px">${sell.time} CARRY</td>
+          <td style="color:#3d5470;font-size:10px">${sell.note?sell.note.slice(0,10):""}</td>
+          <td style="color:#3d5470;font-size:11px;font-style:italic">prev day</td>
+          <td style="font-family:monospace;font-size:12px;color:#f87171">$${sell.price.toFixed(2)}</td>
+          <td style="color:#3d5470;font-size:11px;text-align:center">${sell.qty}sh</td>
+          <td style="color:#f97316;font-family:monospace;text-align:right;font-size:10px">carry-over</td>
+        </tr>`);
+      }
+    });
+    return rows.join("");
+  })();
 
   // Summary row
   const summaryRow = `<tr style="background:#0a0f1a;border-top:1px solid #1a2540">
@@ -438,7 +459,8 @@ function buildTable(){
           <tbody>
             ${matchedRows||"<tr><td colspan='6' style='color:#3d5470;padding:10px 8px;font-size:11px'>No completed trades</td></tr>"}
             ${openRows}
-            ${matched.length>0||buyQueue.length>0 ? summaryRow : ""}
+            ${carryRows}
+            ${matched.length>0||buyQueue.length>0||unmatchedSells.length>0 ? summaryRow : ""}
           </tbody>
         </table>
       </div>
@@ -661,20 +683,30 @@ async function load(){
       const orderSym=(o.symbol||"").toUpperCase();
       return orderSym===sym.toUpperCase() || orderSym.startsWith(sym.toUpperCase());
     });
+    // Track running position to distinguish BUY vs COVER and SELL vs SHORT
+    let runningQty = 0;
     TRADES=filteredOrders.map(o=>{
       const t=new Date(o.filled_at||o.submitted_at);
       const hh=t.getHours().toString().padStart(2,"0"),mm=t.getMinutes().toString().padStart(2,"0");
       const isOption=o.symbol.length>5;
+      const qty=parseFloat(o.filled_qty||0);
       let type;
       if(isOption){
-        // Detect call vs put from contract symbol (e.g. NFLX260529C00090000)
         const isCall=/\d{6}C\d/.test(o.symbol);
         type = o.side==="buy" ? (isCall?"BUY CALL":"BUY PUT") : (isCall?"SELL CALL":"SELL PUT");
       } else {
-        type = o.side==="buy"?"BUY":"SELL";
+        if(o.side==="buy"){
+          // If we're short (negative qty), this is a COVER; if flat/long, it's a BUY
+          type = runningQty < 0 ? "COVER" : "BUY";
+          runningQty += qty;
+        } else {
+          // If we're long (positive qty), this is a SELL; if flat/short, it's a SHORT
+          type = runningQty > 0 ? "SELL" : "SHORT";
+          runningQty -= qty;
+        }
       }
       if(o.side==="buy"){buys++;}else{sells++;}
-      return{type,layer:"",qty:parseFloat(o.filled_qty),price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
+      return{type,layer:"",qty,price:parseFloat(o.filled_avg_price||0),time:`${hh}:${mm}`,note:o.symbol};
     });
     BETTER=betterEntries(BARS,TRADES);
     ALL_TRADES=[...TRADES];
