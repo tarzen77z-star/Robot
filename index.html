@@ -100,18 +100,19 @@ const MU={BUY:true,SELL:false,SHORT:false,COVER:true,
           "BUY PUT":false, "SELL PUT":true};
 
 function sma(d,p){return d.map((b,i)=>{if(i<p-1)return{...b,[`ma${p}`]:null};const a=d.slice(i-p+1,i+1).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ma${p}`]:+a.toFixed(2)};});}
+function ema(d,p){const k=2/(p+1);let seed=null;return d.map((b,i)=>{if(i<p-1)return{...b,[`ema${p}`]:null};if(i===p-1){seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ema${p}`]:+seed.toFixed(2)};}const prev=d[i-1][`ema${p}`]??seed??b.close;seed=b.close*k+prev*(1-k);return{...b,[`ema${p}`]:+seed.toFixed(2)};});}
 function rsi(d,p=14){const c=d.map(x=>x.close);return d.map((b,i)=>{if(i<p)return{...b,rsi:null};let g=0,l=0;for(let j=i-p+1;j<=i;j++){const df=c[j]-c[j-1];df>0?g+=df:l-=df;}const rs=l===0?100:g/l;return{...b,rsi:+(100-100/(1+rs)).toFixed(2)};});}
 function macd(d){const c=d.map(x=>x.close);const ema=(a,p)=>{const k=2/(p+1),r=[a[0]];for(let i=1;i<a.length;i++)r.push(a[i]*k+r[i-1]*(1-k));return r;};const ml=ema(c,12).map((v,i)=>v-ema(c,26)[i]);const sig=ema(ml.slice(26),9);return d.map((b,i)=>({...b,macd:i>=26?+(ml[i]).toFixed(3):null,signal:i>=34?+(sig[i-26]).toFixed(3):null,hist:i>=34?+(ml[i]-sig[i-26]).toFixed(3):null}));}
-function ema(d,p){const k=2/(p+1);let seed=null;return d.map((b,i)=>{if(i<p-1)return{...b,[`ema${p}`]:null};if(i===p-1){seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ema${p}`]:+seed.toFixed(2)};}const prev=d[i-1][`ema${p}`]??seed??b.close;seed=b.close*k+prev*(1-k);return{...b,[`ema${p}`]:+seed.toFixed(2)};});}`]:null};
-    if(i===p-1){
-      seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;
-      return{...b,[`ema${p}`]:+seed.toFixed(2)};
-    }
-    const prev=d[i-1][`ema${p}`]??seed??b.close;
-    seed=b.close*k+prev*(1-k);
-    return{...b,[`ema${p}`]:+seed.toFixed(2)};
-  });
-}
+function ema(d,p){const k=2/(p+1);let seed=null;return d.map((b,i)=>{if(i<p-1)return{...b,[`ema${p}`]:null};if(i===p-1){seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ema${p}`]:+seed.toFixed(2)};}const prev=d[i-1][`ema${p}`]??seed??b.close;seed=b.close*k+prev*(1-k);return{...b,[`ema${p}`]:+seed.toFixed(2)};});}
+
+
+
+
+function sma(d,p){return d.map((b,i)=>{if(i<p-1)return{...b,[`ma${p}`]:null};const a=d.slice(i-p+1,i+1).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ma${p}`]:+a.toFixed(2)};});}
+function rsi(d,p=14){const c=d.map(x=>x.close);return d.map((b,i)=>{if(i<p)return{...b,rsi:null};let g=0,l=0;for(let j=i-p+1;j<=i;j++){const df=c[j]-c[j-1];df>0?g+=df:l-=df;}const rs=l===0?100:g/l;return{...b,rsi:+(100-100/(1+rs)).toFixed(2)};});}
+function macd(d){const c=d.map(x=>x.close);const ema=(a,p)=>{const k=2/(p+1),r=[a[0]];for(let i=1;i<a.length;i++)r.push(a[i]*k+r[i-1]*(1-k));return r;};const ml=ema(c,12).map((v,i)=>v-ema(c,26)[i]);const sig=ema(ml.slice(26),9);return d.map((b,i)=>({...b,macd:i>=26?+(ml[i]).toFixed(3):null,signal:i>=34?+(sig[i-26]).toFixed(3):null,hist:i>=34?+(ml[i]-sig[i-26]).toFixed(3):null}));}
+function ema(d,p){const k=2/(p+1);let seed=null;return d.map((b,i)=>{if(i<p-1)return{...b,[`ema${p}`]:null};if(i===p-1){seed=d.slice(0,p).reduce((s,x)=>s+x.close,0)/p;return{...b,[`ema${p}`]:+seed.toFixed(2)};}const prev=d[i-1][`ema${p}`]??seed??b.close;seed=b.close*k+prev*(1-k);return{...b,[`ema${p}`]:+seed.toFixed(2)};});}
+
 
 function enrich(b){let d=sma(b,20);d=sma(d,50);d=sma(d,200);d=ema(d,50);d=rsi(d);return macd(d);}
 
