@@ -73,6 +73,19 @@ td{padding:6px 10px}
   <span style="color:#3d5470;font-size:10px">— hover markers for details</span>
 </div>
 
+<!-- Strategy info panel -->
+<div id="strat-info" style="display:none;background:#0e1420;border:1px solid #1a2540;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:11px">
+  <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <div id="si-name" style="font-weight:700;font-size:13px;color:#fbbf24;letter-spacing:1px;margin-bottom:4px"></div>
+      <div id="si-signal" style="color:#6b90b0;margin-bottom:2px"></div>
+      <div id="si-window" style="color:#3d5470;font-size:10px"></div>
+    </div>
+    <div id="si-levels" style="font-family:monospace;font-size:10px;line-height:1.8"></div>
+    <div id="si-rules" style="color:#6b90b0;font-size:10px;line-height:1.7;max-width:350px"></div>
+  </div>
+</div>
+
 <div class="panel">
   <div class="plabel">PRICE — 1 MIN CANDLES <span style="color:#3d5470;font-size:9px;font-weight:400">scroll=zoom · drag=pan · dblclick=reset</span></div>
   <div id="wrap" style="overflow-x:auto;overflow-y:visible;position:relative">
@@ -452,74 +465,62 @@ document.getElementById("cv").addEventListener("mousemove",e=>{
 document.getElementById("cv").addEventListener("mouseleave",()=>document.getElementById("tip").style.display="none");
 window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
 
-// ── Zoom with mouse wheel ────────────────────────────────────────────────────
-document.getElementById("cv").addEventListener("wheel",e=>{
-  e.preventDefault();
-  if(!BARS.length)return;
-  const cv=document.getElementById("cv");
-  const rect=cv.getBoundingClientRect();
-  const mx=(e.clientX-rect.left)/rect.width;  // 0-1 position of mouse
-  const span=VIEW.end-VIEW.start;
-  const factor=e.deltaY>0?1.25:0.8;  // scroll down=zoom out, up=zoom in
-  const newSpan=Math.min(1,Math.max(0.05,span*factor));
-  // Zoom centered on mouse position
-  const center=VIEW.start+span*mx;
-  VIEW.start=Math.max(0,center-newSpan*mx);
-  VIEW.end=Math.min(1,VIEW.start+newSpan);
-  VIEW.start=Math.max(0,VIEW.end-newSpan);
-  VIEW.ylo=null;VIEW.yhi=null;  // reset y zoom on x zoom
-  renderAll();
-},{passive:false});
+// ── Chart interactions: zoom + pan ──────────────────────────────────────────
+(function(){
+  const el = ()=>document.getElementById("cv");
+  let drag={on:false,x0:0,s0:0,e0:0};
+  let ydrag={on:false,y0:0,lo0:0,hi0:0};
 
-// ── Pan with click-drag ──────────────────────────────────────────────────────
-document.getElementById("cv").addEventListener("mousedown",e=>{
-  if(e.button!==0)return;
-  DRAG={active:true,x0:e.clientX,s0:VIEW.start,e0:VIEW.end};
-  document.getElementById("cv").style.cursor="grabbing";
-});
-window.addEventListener("mousemove",e=>{
-  if(!DRAG.active||!BARS.length)return;
-  const cv=document.getElementById("cv");
-  const W=cv.getBoundingClientRect().width;
-  const span=DRAG.e0-DRAG.s0;
-  const dx=(DRAG.x0-e.clientX)/W*span*2.5;
-  VIEW.start=Math.max(0,Math.min(1-span,DRAG.s0+dx));
-  VIEW.end=VIEW.start+span;
-  VIEW.ylo=null;VIEW.yhi=null;
-  renderAll();
-});
-window.addEventListener("mouseup",()=>{
-  DRAG.active=false;
-  const cv=document.getElementById("cv");
-  if(cv)cv.style.cursor="crosshair";
-});
+  // Scroll wheel → zoom X
+  el().addEventListener("wheel",e=>{
+    e.preventDefault();
+    if(!BARS.length)return;
+    const rect=el().getBoundingClientRect();
+    const mx=(e.clientX-rect.left)/rect.width;
+    const span=VIEW.end-VIEW.start;
+    const factor=e.deltaY>0?1.3:0.77;
+    const newSpan=Math.min(1,Math.max(0.03,span*factor));
+    const pivot=VIEW.start+span*mx;
+    let ns=pivot-newSpan*mx;
+    let ne=ns+newSpan;
+    if(ns<0){ns=0;ne=newSpan;}
+    if(ne>1){ne=1;ns=1-newSpan;}
+    VIEW.start=ns;VIEW.end=ne;VIEW.ylo=null;VIEW.yhi=null;
+    renderAll();
+  },{passive:false});
 
-// ── Double-click to reset zoom ───────────────────────────────────────────────
-document.getElementById("cv").addEventListener("dblclick",()=>{
-  VIEW={start:0,end:1,ylo:null,yhi:null};
-  renderAll();
-});
+  // Left click drag → pan X
+  el().addEventListener("mousedown",e=>{
+    if(e.button===0){
+      drag={on:true,x0:e.clientX,s0:VIEW.start,e0:VIEW.end};
+      el().style.cursor="grabbing";
+    }
+  });
 
-// ── Right-click drag to zoom Y axis ─────────────────────────────────────────
-let YDRAG={active:false,y0:0,lo0:0,hi0:0};
-document.getElementById("cv").addEventListener("contextmenu",e=>e.preventDefault());
-document.getElementById("cv").addEventListener("mousedown",e=>{
-  if(e.button!==2&&BARS.length){
-    YDRAG={active:true,y0:e.clientY,
-      lo0:VIEW.ylo??Math.min(...BARS.slice(Math.floor(VIEW.start*(BARS.length-1)),Math.ceil(VIEW.end*(BARS.length-1))+1).map(b=>b.low))*0.999,
-      hi0:VIEW.yhi??Math.max(...BARS.slice(Math.floor(VIEW.start*(BARS.length-1)),Math.ceil(VIEW.end*(BARS.length-1))+1).map(b=>b.high))*1.001
-    };
-  }
-});
-window.addEventListener("mousemove",e=>{
-  if(!YDRAG.active)return;
-  const dy=(YDRAG.y0-e.clientY)/300;
-  const rng=YDRAG.hi0-YDRAG.lo0;
-  VIEW.ylo=YDRAG.lo0+rng*dy*0.5;
-  VIEW.yhi=YDRAG.hi0-rng*dy*0.5;
-  renderAll();
-});
-window.addEventListener("mouseup",()=>YDRAG.active=false);
+  // Double click → reset
+  el().addEventListener("dblclick",()=>{
+    VIEW={start:0,end:1,ylo:null,yhi:null};
+    renderAll();
+  });
+
+  // Context menu suppress
+  el().addEventListener("contextmenu",e=>e.preventDefault());
+
+  // Global mouse move and up
+  window.addEventListener("mousemove",e=>{
+    if(drag.on&&BARS.length){
+      const W=el().getBoundingClientRect().width||900;
+      const span=drag.e0-drag.s0;
+      const dx=(drag.x0-e.clientX)/W*span*3;
+      let ns=Math.max(0,Math.min(1-span,drag.s0+dx));
+      VIEW.start=ns;VIEW.end=ns+span;VIEW.ylo=null;VIEW.yhi=null;
+      renderAll();
+    }
+  });
+  window.addEventListener("mouseup",e=>{
+    if(drag.on){drag.on=false;el().style.cursor="crosshair";}
+  });
+})();
 
 let ACTIVE_FILTER = 'ALL';
 let ALL_TRADES = [];
@@ -655,6 +656,7 @@ async function load(){
     });
     ACTIVE_FILTER='ALL';
     toggleFilter('ALL');
+    showStratInfo(sym, BARS);
     // Show active ticker badge
     const badge=document.getElementById('activeTicker');
     if(badge){badge.textContent=sym.toUpperCase();badge.style.display='block';}
@@ -663,6 +665,114 @@ async function load(){
     alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
   }
   btn.disabled=false;btn.textContent="LOAD";
+}
+
+// ── Strategy definitions ─────────────────────────────────────────────────────
+const STRAT_INFO = {
+  MSTR: {
+    name: "MSTR — 6-Layer Pivot Strategy",
+    signal: "Classic pivot point support & resistance levels",
+    window: "9:30am – 3:45pm ET  |  Shares",
+    rules: [
+      "L1: BUY at pivot support → SELL 100% at next resistance",
+      "L2: BUY every $5 drop → EXIT at +1.5%",
+      "L3: SELL all L1 shares when price hits resistance",
+      "L4: SHORT at resistance → cover at +2% profit or -0.5% stop",
+      "L5: BUY if RSI<20 or $10 open drop → EXIT at +2%",
+      "L6: SHORT at each resistance level",
+    ],
+    levelsKey: "mstr"
+  },
+  META: {
+    name: "META — MA20/MA50 Crossover",
+    signal: "MA20 crosses above MA50 → BUY LONG  |  MA20 crosses below MA50 → SHORT",
+    window: "9:30am – 3:55pm ET  |  20 shares",
+    rules: [
+      "MA20 crosses UP through MA50 → cover short + BUY 20 shares",
+      "MA20 crosses DOWN through MA50 → sell long + SHORT 20 shares",
+      "EOD at 3:55pm: close all positions",
+      "10-min cooldown between trades",
+    ],
+    levelsKey: null
+  },
+  TSLA: {
+    name: "TSLA — MA20 Slope Reversal (Options)",
+    signal: "MA20 slope reverses direction → BUY CALL or BUY PUT",
+    window: "9:30am – 3:55pm ET  |  3 contracts",
+    rules: [
+      "Slope was falling & turns up → BUY CALL (3 contracts)",
+      "Slope was rising & turns down → BUY PUT (3 contracts)",
+      "Exit: slope reverses OR price hits MA200 OR +10% profit",
+      "Monthly ATM options (June/July expiry)",
+      "5-min cooldown between trades",
+    ],
+    levelsKey: "tsla"
+  },
+  NFLX: {
+    name: "NFLX — MA20/MA50 Crossover (Options)",
+    signal: "MA20 crosses MA50 → BUY CALL or BUY PUT",
+    window: "9:30am – 3:55pm ET  |  3 contracts",
+    rules: [
+      "MA20 crosses UP through MA50 → BUY CALL (3 contracts)",
+      "MA20 crosses DOWN through MA50 → BUY PUT (3 contracts)",
+      "Exit: opposite crossover OR price hits MA200 OR +10% profit",
+      "Monthly ATM options (June/July expiry)",
+    ],
+    levelsKey: "nflx"
+  },
+  GOOGL: {
+    name: "GOOGL — RSI Strategy",
+    signal: "RSI ≤25 → BUY LONG  |  RSI ≥70 → SHORT  |  RSI ≥75 → SELL LONG",
+    window: "9:30am – 3:55pm ET  |  50 shares",
+    rules: [
+      "RSI drops to ≤25 → BUY 50 shares long",
+      "RSI rises to ≥75 → SELL 50 shares (exit long)",
+      "RSI rises to ≥70 (flat) → SHORT 50 shares",
+      "RSI drops to ≤25 (short) → COVER short + BUY long immediately",
+      "Will not rebuy if already holding position",
+    ],
+    levelsKey: null
+  }
+};
+
+function showStratInfo(sym, bars){
+  const info = STRAT_INFO[sym];
+  const panel = document.getElementById("strat-info");
+  if(!info){panel.style.display="none";return;}
+  panel.style.display="block";
+  document.getElementById("si-name").textContent   = info.name;
+  document.getElementById("si-signal").textContent = "Signal: " + info.signal;
+  document.getElementById("si-window").textContent = info.window;
+
+  // Rules
+  document.getElementById("si-rules").innerHTML =
+    "<b style='color:#dce8f5'>Logic:</b><br>" +
+    info.rules.map(r=>`• ${r}`).join("<br>");
+
+  // Levels from today's bars
+  const lvlDiv = document.getElementById("si-levels");
+  if(bars && bars.length > 0 && (sym==="MSTR"||sym==="TSLA"||sym==="NFLX")){
+    const hi  = Math.max(...bars.map(b=>b.high));
+    const lo  = Math.min(...bars.map(b=>b.low));
+    const cl  = bars[bars.length-1]?.close || 0;
+    const pivot = (hi+lo+cl)/3;
+    const r1 = 2*pivot-lo, r2 = pivot+(hi-lo), r3 = hi+2*(pivot-lo);
+    const s1 = 2*pivot-hi, s2 = pivot-(hi-lo), s3 = lo-2*(hi-pivot);
+    const cur = bars[bars.length-1]?.close||0;
+    const fmt = v=>"$"+v.toFixed(2);
+    lvlDiv.innerHTML =
+      `<b style='color:#dce8f5'>Today's Pivot Levels</b><br>`+
+      `<span style='color:#ef4444'>R3 ${fmt(r3)}</span><br>`+
+      `<span style='color:#ef4444'>R2 ${fmt(r2)}</span><br>`+
+      `<span style='color:#ef4444'>R1 ${fmt(r1)}</span><br>`+
+      `<span style='color:#fbbf24'>Pivot ${fmt(pivot)}</span><br>`+
+      `<span style='color:#22c55e'>S1 ${fmt(s1)}</span><br>`+
+      `<span style='color:#22c55e'>S2 ${fmt(s2)}</span><br>`+
+      `<span style='color:#22c55e'>S3 ${fmt(s3)}</span><br>`+
+      `<span style='color:#3d5470;font-size:9px'>Current: ${fmt(cur)}</span>`;
+  } else {
+    lvlDiv.innerHTML = "";
+  }
 }
 
 document.getElementById("dt").value=new Date().toISOString().split("T")[0];
