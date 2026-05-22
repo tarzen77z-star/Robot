@@ -86,10 +86,10 @@ td{padding:6px 10px}
   </div>
 </div>
 
-<div class="panel">
+<div class="panel" style="overflow:hidden">
   <div class="plabel">PRICE — 1 MIN CANDLES <span style="color:#3d5470;font-size:9px;font-weight:400">scroll=zoom · drag=pan · dblclick=reset</span></div>
   <div id="wrap" style="overflow-x:auto;overflow-y:visible;position:relative">
-    <canvas id="cv" height="300" style="cursor:crosshair"></canvas>
+    <canvas id="cv" height="300" style="cursor:crosshair;display:block;width:100%"></canvas>
   </div>
 </div>
 <div class="panel"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
@@ -167,7 +167,7 @@ function py(v,hi,lo){return 40+(260-((v-lo)/(hi-lo))*260);}
 
 function drawCandles(){
   const wrap=document.getElementById("wrap");
-  CVW=Math.max(wrap.clientWidth||900,BARS.length*3);
+  CVW=wrap.clientWidth||900;  // always fit window — no horizontal scroll
   const cv=document.getElementById("cv");cv.width=CVW;cv.height=300;
   const ctx=cv.getContext("2d");
   const PL=58,PR=10,PT=40,W=CVW-PL-PR,H=260;
@@ -193,6 +193,28 @@ function drawCandles(){
     });
     ctx.stroke();
   });
+
+  // Draw pivot levels for MSTR (if available)
+  if(window._PIVOT_LEVELS){
+    const lvls=[
+      {v:window._PIVOT_LEVELS.r3,c:"#ef444455",l:"R3"},
+      {v:window._PIVOT_LEVELS.r2,c:"#ef444466",l:"R2"},
+      {v:window._PIVOT_LEVELS.r1,c:"#ef444488",l:"R1"},
+      {v:window._PIVOT_LEVELS.pivot,c:"#fbbf2499",l:"P"},
+      {v:window._PIVOT_LEVELS.s1,c:"#22c55e88",l:"S1"},
+      {v:window._PIVOT_LEVELS.s2,c:"#22c55e66",l:"S2"},
+      {v:window._PIVOT_LEVELS.s3,c:"#22c55e55",l:"S3"},
+    ];
+    lvls.forEach(({v,c,l})=>{
+      if(v<lo||v>hi)return;  // skip if outside visible range
+      const y=gy(v);
+      ctx.strokeStyle=c;ctx.lineWidth=0.8;ctx.setLineDash([5,4]);
+      ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(PL+W,y);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle=c;ctx.font="bold 9px monospace";ctx.textAlign="left";
+      ctx.fillText(l+" $"+v.toFixed(2),PL+2,y-2);
+    });
+  }
 
   // Draw candles
   BARS.forEach((b,i)=>{const x=gx(i),up=b.close>=b.open,col=up?"#22c55e":"#ef4444";ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,gy(b.high));ctx.lineTo(x,gy(b.low));ctx.stroke();ctx.fillStyle=col;ctx.globalAlpha=.85;ctx.fillRect(x-bw/2,gy(Math.max(b.open,b.close)),bw,Math.max(1,gy(Math.min(b.open,b.close))-gy(Math.max(b.open,b.close))));ctx.globalAlpha=1;});
@@ -492,6 +514,7 @@ window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
   // Left click drag → pan X
   el().addEventListener("mousedown",e=>{
     if(e.button===0){
+      e.preventDefault();
       drag={on:true,x0:e.clientX,s0:VIEW.start,e0:VIEW.end};
       el().style.cursor="grabbing";
     }
@@ -509,9 +532,10 @@ window.addEventListener("resize",()=>{if(BARS.length)renderAll();});
   // Global mouse move and up
   window.addEventListener("mousemove",e=>{
     if(drag.on&&BARS.length){
-      const W=el().getBoundingClientRect().width||900;
+      const W=el().getBoundingClientRect().width||CVW||900;
       const span=drag.e0-drag.s0;
-      const dx=(drag.x0-e.clientX)/W*span*3;
+      // px moved / canvas width * current view span = fraction to shift
+      const dx=(drag.x0-e.clientX)/W*span;
       let ns=Math.max(0,Math.min(1-span,drag.s0+dx));
       VIEW.start=ns;VIEW.end=ns+span;VIEW.ylo=null;VIEW.yhi=null;
       renderAll();
@@ -760,6 +784,8 @@ function showStratInfo(sym, bars){
     const s1 = 2*pivot-hi, s2 = pivot-(hi-lo), s3 = lo-2*(hi-pivot);
     const cur = bars[bars.length-1]?.close||0;
     const fmt = v=>"$"+v.toFixed(2);
+    // Store for chart drawing
+    window._PIVOT_LEVELS={r3,r2,r1,pivot,s1,s2,s3};
     lvlDiv.innerHTML =
       `<b style='color:#dce8f5'>Today's Pivot Levels</b><br>`+
       `<span style='color:#ef4444'>R3 ${fmt(r3)}</span><br>`+
@@ -771,6 +797,7 @@ function showStratInfo(sym, bars){
       `<span style='color:#22c55e'>S3 ${fmt(s3)}</span><br>`+
       `<span style='color:#3d5470;font-size:9px'>Current: ${fmt(cur)}</span>`;
   } else {
+    window._PIVOT_LEVELS = null;
     lvlDiv.innerHTML = "";
   }
 }
