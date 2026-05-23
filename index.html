@@ -92,9 +92,9 @@ td{padding:6px 10px}
     <canvas id="cv" height="360" style="cursor:crosshair;display:block;width:100%"></canvas>
   </div>
 </div>
-<div class="panel"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
 <div class="panel"><div class="plabel">RSI (14)</div><canvas id="rsiCv" height="100" style="width:100%"></canvas></div>
-<div class="panel" style="margin-bottom:14px"><div class="plabel">MACD (12, 26, 9)</div><canvas id="macdCv" height="180" style="width:100%"></canvas></div>
+<div class="panel"><div class="plabel">MACD (12, 26, 9)</div><canvas id="macdCv" height="180" style="width:100%"></canvas></div>
+<div class="panel" style="margin-bottom:14px"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
 <div id="tbl"></div>
 <div id="msg" style="text-align:center;padding:60px 20px;color:#3d5470;font-size:13px">
   Enter your Alpaca paper trading keys, pick a date and click LOAD
@@ -267,9 +267,18 @@ function drawSub(id,h,fn){
 }
 
 function volFn(ctx,cw,h){
-  const PL=54,W=cw-PL-14,H=h-18,mx=Math.max(...BARS.map(b=>b.volume)),bw=Math.max(1,Math.floor(W/BARS.length)-1),gx=i=>PL+(i/(BARS.length-1))*W;
+  const PL=54,W=cw-PL-14,H=h-18;
+  const bw=Math.max(1,Math.floor(W/BARS.length)-1);
+  const gx=i=>PL+(i/Math.max(BARS.length-1,1))*W;
+  // Use 95th percentile max to prevent one spike from flattening all bars
+  const vols=[...BARS.map(b=>b.volume)].sort((a,b)=>a-b);
+  const mx=Math.max(vols[Math.floor(vols.length*0.95)]||1, 1);
   ctx.clearRect(0,0,cw,h);
-  BARS.forEach((b,i)=>{const bh=(b.volume/mx)*H;ctx.fillStyle=b.close>=b.open?"#16a34a99":"#dc262699";ctx.fillRect(gx(i)-bw/2,H-bh+2,bw,bh);});
+  BARS.forEach((b,i)=>{
+    const bh=Math.min((b.volume/mx)*H, H);
+    ctx.fillStyle=b.close>=b.open?"#16a34a99":"#dc262699";
+    ctx.fillRect(gx(i)-bw/2,H-bh+2,bw,bh);
+  });
   BARS.forEach((b,i)=>{if(i%30!==0)return;ctx.fillStyle="#6b90b0";ctx.font="9px monospace";ctx.textAlign="center";ctx.fillText(b.time,gx(i),h-3);});
 }
 
