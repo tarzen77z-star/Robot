@@ -96,6 +96,16 @@ td{padding:6px 10px}
 <div class="panel"><div class="plabel">MACD (12, 26, 9)</div><canvas id="macdCv" height="180" style="width:100%"></canvas></div>
 <div class="panel" style="margin-bottom:14px"><div class="plabel">VOLUME</div><canvas id="volCv" height="55" style="width:100%"></canvas></div>
 <div id="tbl"></div>
+
+<!-- Backtest Panel -->
+<div id="bt-panel" style="display:none;margin-top:10px">
+  <div class="panel" style="margin-bottom:14px">
+    <div class="plabel">BACKTEST — based on today's bar data
+      <span style="color:#3d5470;font-size:9px;font-weight:400;margin-left:8px">simulated $100k capital · 1-min bars</span>
+    </div>
+    <div id="bt-body" style="padding:8px 12px;font-size:11px;font-family:monospace"></div>
+  </div>
+</div>
 <div id="msg" style="text-align:center;padding:60px 20px;color:#3d5470;font-size:13px">
   Enter your Alpaca paper trading keys, pick a date and click LOAD
 </div>
@@ -760,6 +770,7 @@ async function load(){
     ACTIVE_FILTER='ALL';
     toggleFilter('ALL');
     showStratInfo(sym, BARS);
+    renderBacktest(BARS, TRADES);
     // Show active ticker badge
     const badge=document.getElementById('activeTicker');
     if(badge){badge.textContent=sym.toUpperCase();badge.style.display='block';}
@@ -768,6 +779,201 @@ async function load(){
     alert("Error loading data:\n"+err.message+"\n\nMake sure you are running this file locally (not inside Claude).");
   }
   btn.disabled=false;btn.textContent="LOAD";
+}
+
+// ── Backtest Engine ───────────────────────────────────────────────────────────
+function runBacktest(bars, trades, capital=100000) {
+  if(!bars||bars.length<10) return null;
+
+  const closes = bars.map(b=>b.close);
+  let cash=capital, position=0, entryPx=0;
+  let equity=[capital];
+  let btTrades=[], wins=0, totalTrades=0;
+
+  // Build signal array from actual trades (1=buy, -1=sell, 0=hold)
+  // Map trade times to bar indices
+  const timeToIdx={};
+  bars.forEach((b,i)=>timeToIdx[b.time]=i);
+
+  // Simulate: buy on BUY/COVER, sell on SELL/SHORT
+  for(let i=0;i<bars.length;i++){
+    const price=closes[i];
+    // Check if a trade happened at this bar
+    const barTrade=trades.find(t=>t.time===bars[i].time);
+    if(barTrade){
+      const isBuy = barTrade.type==="BUY"||barTrade.type==="COVER";
+      const isSell= barTrade.type==="SELL"||barTrade.type==="SHORT";
+      if(isBuy && position===0){
+        const shares=Math.floor(cash*0.95/price);
+        if(shares>0){position=shares;entryPx=price;cash-=shares*price;}
+      } else if(isSell && position>0){
+        const pnl=(price-entryPx)*position;
+        cash+=position*price;
+        if(pnl>0)wins++;
+        totalTrades++;
+        btTrades.push({pnl,entry:entryPx,exit:price});
+        position=0;
+      }
+    }
+    equity.push(cash+position*price);
+  }
+  if(position>0){cash+=position*closes[closes.length-1];position=0;}
+
+  // Pure price-based signals for strategy backtest (RSI, MACD, EMA cross)
+  // RSI strategy
+  function calcRSI(closes,period=14){
+    const rsi=[];
+    for(let i=0;i<closes.length;i++){
+      if(i<period){rsi.push(50);continue;}
+      let gains=0,losses=0;
+      for(let j=i-period+1;j<=i;j++){
+        const d=closes[j]-closes[j-1];
+        if(d>0)gains+=d;else losses-=d;
+      }
+      const rs=(gains/period)/((losses/period)||0.0001);
+      rsi.push(100-100/(1+rs));
+    }
+    return rsi;
+  }
+
+  function calcEMA(closes,span){
+    const k=2/(span+1);
+    const ema=[closes[0]];
+    for(let i=1;i<closes.length;i++) ema.push(closes[i]*k+ema[i-1]*(1-k));
+    return ema;
+  }
+
+  function simStrategy(closes,signals,capital=100000){
+    let cash=capital,pos=0,entry=0,trades=0,wins=0;
+    const equity=[capital];
+    for(let i=0;i<closes.length;i++){
+      const p=closes[i],s=signals[i];
+      if(s===1&&pos===0){const sh=Math.floor(cash*0.95/p);if(sh>0){pos=sh;entry=p;cash-=sh*p;}}
+      else if(s===-1&&pos>0){const pnl=(p-entry)*pos;cash+=pos*p;if(pnl>0)wins++;trades++;pos=0;}
+      equity.push(cash+pos*p);
+    }
+    if(pos>0)cash+=pos*closes[closes.length-1];
+    const eq=equity;
+    const rets=eq.slice(1).map((v,i)=>(v-eq[i])/eq[i]);
+    const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
+    const std=Math.sqrt(rets.map(r=>(r-mean)**2).reduce((a,b)=>a+b,0)/rets.length);
+    const sharpe=std>0?mean/std*Math.sqrt(252*390):0;
+    const ret=(cash-capital)/capital*100;
+    const peak=eq.reduce((acc,v,i)=>{acc.push(i===0?v:Math.max(acc[i-1],v));return acc;},[]);
+    const dd=eq.map((v,i)=>(peak[i]-v)/peak[i]*100);
+    const maxDD=Math.max(...dd);
+    const wr=trades>0?wins/trades*100:0;
+    return{ret,sharpe,maxDD,wr,trades,finalVal:cash};
+  }
+
+  // Calculate strategies
+  const rsi=calcRSI(closes);
+  const rsiSig=rsi.map(r=>r<30?1:r>70?-1:0);
+
+  const ema12=calcEMA(closes,12),ema26=calcEMA(closes,26);
+  const macdLine=ema12.map((v,i)=>v-ema26[i]);
+  const signal=calcEMA(macdLine,9);
+  const macdSig=macdLine.map((v,i)=>i===0?0:
+    (macdLine[i]>signal[i]&&macdLine[i-1]<=signal[i-1])?1:
+    (macdLine[i]<signal[i]&&macdLine[i-1]>=signal[i-1])?-1:0);
+
+  const ema9=calcEMA(closes,9),ema21=calcEMA(closes,21);
+  const emaSig=ema9.map((v,i)=>i===0?0:
+    (ema9[i]>ema21[i]&&ema9[i-1]<=ema21[i-1])?1:
+    (ema9[i]<ema21[i]&&ema9[i-1]>=ema21[i-1])?-1:0);
+
+  const sma20=closes.map((v,i)=>i<19?v:closes.slice(i-19,i+1).reduce((a,b)=>a+b)/20);
+  const std20=closes.map((v,i)=>{
+    if(i<19)return 0;
+    const sl=closes.slice(i-19,i+1);
+    const m=sl.reduce((a,b)=>a+b)/20;
+    return Math.sqrt(sl.map(x=>(x-m)**2).reduce((a,b)=>a+b)/20);
+  });
+  const bbSig=closes.map((v,i)=>v<sma20[i]-2*std20[i]?1:v>sma20[i]+2*std20[i]?-1:0);
+
+  const strats=[
+    {name:"RSI(14) <30/>70",    res:simStrategy(closes,rsiSig)},
+    {name:"MACD(12,26,9) cross", res:simStrategy(closes,macdSig)},
+    {name:"EMA Cross(9,21)",     res:simStrategy(closes,emaSig)},
+    {name:"Bollinger(20,2σ)",    res:simStrategy(closes,bbSig)},
+  ];
+
+  // Actual trade performance
+  const totalPnl=btTrades.reduce((s,t)=>s+t.pnl,0);
+  const actualRet=totalPnl/capital*100;
+  const winRate=totalTrades>0?wins/totalTrades*100:0;
+
+  // Max drawdown from equity curve
+  const eqArr=equity;
+  const peakArr=eqArr.reduce((acc,v,i)=>{acc.push(i===0?v:Math.max(acc[i-1],v));return acc;},[]);
+  const ddArr=eqArr.map((v,i)=>(peakArr[i]-v)/peakArr[i]*100);
+  const maxDD=Math.max(...ddArr)||0;
+
+  return {strats, actualPnl:totalPnl, actualRet, winRate, totalTrades, maxDD, capital};
+}
+
+function renderBacktest(bars, trades){
+  const panel=document.getElementById("bt-panel");
+  const body=document.getElementById("bt-body");
+  if(!bars||bars.length<20){panel.style.display="none";return;}
+
+  const res=runBacktest(bars, trades);
+  if(!res){panel.style.display="none";return;}
+  panel.style.display="block";
+
+  const col=v=>v>=0?"#22c55e":"#ef4444";
+  const fmt=v=>(v>=0?"+":"")+v.toFixed(2)+"%";
+  const fmtS=v=>v.toFixed(2);
+
+  let html=`
+  <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <div style="color:#dce8f5;font-weight:700;margin-bottom:6px">TODAY'S ACTUAL TRADES</div>
+      <table style="border-collapse:collapse;font-size:11px">
+        <tr><td style="color:#6b90b0;padding:2px 8px 2px 0">Realized P&L</td>
+            <td style="color:${col(res.actualPnl)};font-weight:700">$${res.actualPnl.toFixed(2)}</td></tr>
+        <tr><td style="color:#6b90b0;padding:2px 8px 2px 0">Return on capital</td>
+            <td style="color:${col(res.actualRet)}">${fmt(res.actualRet)}</td></tr>
+        <tr><td style="color:#6b90b0;padding:2px 8px 2px 0">Win rate</td>
+            <td style="color:#dce8f5">${res.winRate.toFixed(0)}%</td></tr>
+        <tr><td style="color:#6b90b0;padding:2px 8px 2px 0">Completed trades</td>
+            <td style="color:#dce8f5">${res.totalTrades}</td></tr>
+        <tr><td style="color:#6b90b0;padding:2px 8px 2px 0">Max drawdown</td>
+            <td style="color:#f97316">-${res.maxDD.toFixed(1)}%</td></tr>
+      </table>
+    </div>
+    <div style="flex:1;min-width:280px">
+      <div style="color:#dce8f5;font-weight:700;margin-bottom:6px">STRATEGY SIMULATION — $100k capital · today's bars</div>
+      <table style="border-collapse:collapse;font-size:11px;width:100%">
+        <tr style="color:#3d5470;border-bottom:1px solid #1a2540">
+          <th style="text-align:left;padding:2px 12px 4px 0">Strategy</th>
+          <th style="text-align:right;padding:2px 8px 4px">Return</th>
+          <th style="text-align:right;padding:2px 8px 4px">Sharpe</th>
+          <th style="text-align:right;padding:2px 8px 4px">Win%</th>
+          <th style="text-align:right;padding:2px 8px 4px">Trades</th>
+          <th style="text-align:right;padding:2px 0px 4px">MaxDD</th>
+        </tr>`;
+
+  res.strats.forEach(s=>{
+    const r=s.res;
+    html+=`<tr style="border-bottom:1px solid #0e1420">
+      <td style="color:#6b90b0;padding:3px 12px 3px 0">${s.name}</td>
+      <td style="text-align:right;color:${col(r.ret)};padding:3px 8px">${fmt(r.ret)}</td>
+      <td style="text-align:right;color:${r.sharpe>0?"#22c55e":r.sharpe>-1?"#fbbf24":"#ef4444"};padding:3px 8px">${fmtS(r.sharpe)}</td>
+      <td style="text-align:right;color:#dce8f5;padding:3px 8px">${r.wr.toFixed(0)}%</td>
+      <td style="text-align:right;color:#dce8f5;padding:3px 8px">${r.trades}</td>
+      <td style="text-align:right;color:#f97316;padding:3px 0">-${r.maxDD.toFixed(1)}%</td>
+    </tr>`;
+  });
+
+  html+=`</table>
+      <div style="color:#3d5470;font-size:9px;margin-top:6px">
+        Sharpe &gt; 1.0 = good · &gt; 2.0 = excellent · Annualized from 1-min bars
+      </div>
+    </div>
+  </div>`;
+
+  body.innerHTML=html;
 }
 
 // ── Strategy definitions ─────────────────────────────────────────────────────
